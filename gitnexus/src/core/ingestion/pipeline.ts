@@ -2,7 +2,7 @@ import { createKnowledgeGraph } from '../graph/graph.js';
 import { processStructure } from './structure-processor.js';
 import { processParsing } from './parsing-processor.js';
 import { processImports, processImportsFromExtracted, createImportMap, buildImportResolutionContext } from './import-processor.js';
-import { processCalls, processCallsFromExtracted } from './call-processor.js';
+import { processCalls, processCallsFromExtracted, processRoutesFromExtracted } from './call-processor.js';
 import { processHeritage, processHeritageFromExtracted } from './heritage-processor.js';
 import { processCommunities } from './community-processor.js';
 import { processProcesses } from './process-processor.js';
@@ -11,6 +11,7 @@ import { createASTCache } from './ast-cache.js';
 import { PipelineProgress, PipelineResult } from '../../types/pipeline.js';
 import { walkRepositoryPaths, readFileContents } from './filesystem-walker.js';
 import { getLanguageFromFilename } from './utils.js';
+import { isLanguageAvailable } from '../tree-sitter/parser-loader.js';
 import { createWorkerPool, WorkerPool } from './workers/worker-pool.js';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -88,7 +89,23 @@ export const runPipelineFromRepo = async (
     // Group parseable files into byte-budget chunks so only ~20MB of source
     // is in memory at a time. Each chunk is: read → parse → extract → free.
 
-    const parseableScanned = scannedFiles.filter(f => getLanguageFromFilename(f.path));
+    const parseableScanned = scannedFiles.filter(f => {
+      const lang = getLanguageFromFilename(f.path);
+      return lang && isLanguageAvailable(lang);
+    });
+
+    // Warn about files skipped due to unavailable parsers
+    const skippedByLang = new Map<string, number>();
+    for (const f of scannedFiles) {
+      const lang = getLanguageFromFilename(f.path);
+      if (lang && !isLanguageAvailable(lang)) {
+        skippedByLang.set(lang, (skippedByLang.get(lang) || 0) + 1);
+      }
+    }
+    for (const [lang, count] of skippedByLang) {
+      console.warn(`Skipping ${count} ${lang} file(s) — ${lang} parser not available (native binding may not have built). Try: npm rebuild tree-sitter-${lang}`);
+    }
+
     const totalParseable = parseableScanned.length;
 
     // Build byte-budget chunks
@@ -183,6 +200,10 @@ export const runPipelineFromRepo = async (
           // Heritage — resolve immediately, then free
           if (chunkWorkerData.heritage.length > 0) {
             await processHeritageFromExtracted(graph, chunkWorkerData.heritage, symbolTable);
+          }
+          // Routes — resolve immediately (Laravel route→controller CALLS edges)
+          if (chunkWorkerData.routes && chunkWorkerData.routes.length > 0) {
+            await processRoutesFromExtracted(graph, chunkWorkerData.routes, symbolTable, importMap);
           }
         } else {
           await processImports(graph, chunkFiles, astCache, importMap, undefined, repoPath, allPaths);
