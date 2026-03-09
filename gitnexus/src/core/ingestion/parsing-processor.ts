@@ -159,11 +159,25 @@ export const isNodeExported = (node: any, name: string, language: string): boole
       // No visibility modifier = public (Kotlin default)
       return true;
 
-    // C/C++: No native export concept at language level
-    // Entry points will be detected via name patterns (main, etc.)
+    // C/C++: Functions without 'static' storage class have external linkage
+    // by default, making them globally accessible (equivalent to exported).
+    // Only functions explicitly marked 'static' are file-scoped (not exported).
     case 'c':
-    case 'cpp':
-      return false;
+    case 'cpp': {
+      // Walk up to the function_definition/declaration and check for 'static'
+      let cur = node;
+      while (cur) {
+        if (cur.type === 'function_definition' || cur.type === 'declaration') {
+          // Check text before the opening brace (or semicolon) for 'static'
+          const declText: string = (cur.text || '').split('{')[0].split(';')[0];
+          // 'static' as a storage class (not 'static_assert' etc.)
+          if (/\bstatic\b/.test(declText)) return false;
+          return true; // No 'static' = external linkage = exported
+        }
+        cur = cur.parent;
+      }
+      return true; // Top-level C/C++ functions default to external linkage
+    }
 
     // Swift: Check for 'public' or 'open' access modifiers
     case 'swift':

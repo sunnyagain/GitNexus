@@ -225,9 +225,22 @@ const isNodeExported = (node: any, name: string, language: string): boolean => {
       // No visibility modifier = public (Kotlin default)
       return true;
 
+    // C/C++: Functions without 'static' storage class have external linkage
+    // by default, making them globally accessible (equivalent to exported).
+    // Only functions explicitly marked 'static' are file-scoped (not exported).
     case 'c':
-    case 'cpp':
-      return false;
+    case 'cpp': {
+      let cur = node;
+      while (cur) {
+        if (cur.type === 'function_definition' || cur.type === 'declaration') {
+          const declText: string = (cur.text || '').split('{')[0].split(';')[0];
+          if (/\bstatic\b/.test(declText)) return false;
+          return true;
+        }
+        cur = cur.parent;
+      }
+      return true;
+    }
 
     case 'php':
       // Top-level classes/interfaces/traits are always accessible
@@ -297,9 +310,27 @@ const findEnclosingFunctionId = (node: any, filePath: string): string | null => 
 
       if (['function_declaration', 'function_definition', 'async_function_declaration',
            'generator_function_declaration', 'function_item'].includes(current.type)) {
+        // Try direct name field (JS/TS/Python/Rust)
         const nameNode = current.childForFieldName?.('name') ||
           current.children?.find((c: any) => c.type === 'identifier' || c.type === 'property_identifier');
-        funcName = nameNode?.text;
+        if (nameNode) {
+          funcName = nameNode.text;
+        } else {
+          // C/C++: name is nested in declarator -> function_declarator -> identifier/qualified_identifier
+          const declarator = current.childForFieldName?.('declarator');
+          if (declarator) {
+            const innerDecl = declarator.childForFieldName?.('declarator');
+            if (innerDecl?.type === 'identifier') {
+              funcName = innerDecl.text;
+            } else if (innerDecl?.type === 'qualified_identifier') {
+              // C++ qualified name: Foo::bar — captured as 'Method' node
+              const nameIdent = innerDecl.childForFieldName?.('name') ||
+                innerDecl.children?.find((c: any) => c.type === 'identifier');
+              funcName = nameIdent?.text;
+              label = 'Method'; // qualified_identifier => registered as Method
+            }
+          }
+        }
       } else if (current.type === 'impl_item') {
         const funcItem = current.children?.find((c: any) => c.type === 'function_item');
         if (funcItem) {
@@ -359,7 +390,8 @@ const BUILT_INS = new Set([
   'hasOwnProperty', 'toString', 'valueOf',
   // Python
   'print', 'len', 'range', 'str', 'int', 'float', 'list', 'dict', 'set', 'tuple',
-  'open', 'read', 'write', 'close', 'append', 'extend', 'update',
+  'append', 'extend', 'update',
+  // NOTE: 'open', 'read', 'write', 'close' removed — these are real C POSIX syscalls
   'super', 'type', 'isinstance', 'issubclass', 'getattr', 'setattr', 'hasattr',
   'enumerate', 'zip', 'sorted', 'reversed', 'min', 'max', 'sum', 'abs',
   // Kotlin stdlib (IMPORTANT: keep in sync with call-processor.ts BUILT_IN_NAMES)

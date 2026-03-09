@@ -232,6 +232,9 @@ export const CPP_QUERIES = `
 (function_definition declarator: (function_declarator declarator: (identifier) @name)) @definition.function
 (function_definition declarator: (function_declarator declarator: (qualified_identifier name: (identifier) @name))) @definition.method
 
+; Inline class methods (defined inside the class body)
+(field_declaration declarator: (function_declarator declarator: (identifier) @name)) @definition.method
+
 ; Templates
 (template_declaration (class_specifier name: (type_identifier) @name)) @definition.template
 (template_declaration (function_definition declarator: (function_declarator declarator: (identifier) @name))) @definition.template
@@ -282,9 +285,9 @@ export const CSHARP_QUERIES = `
 
 ; Heritage
 (class_declaration name: (identifier) @heritage.class
-  (base_list (simple_base_type (identifier) @heritage.extends))) @heritage
+  (base_list (identifier) @heritage.extends)) @heritage
 (class_declaration name: (identifier) @heritage.class
-  (base_list (simple_base_type (generic_name (identifier) @heritage.extends)))) @heritage
+  (base_list (generic_name (identifier) @heritage.extends))) @heritage
 `;
 
 // Rust queries - works with tree-sitter-rust
