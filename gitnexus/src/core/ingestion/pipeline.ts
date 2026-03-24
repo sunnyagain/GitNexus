@@ -459,6 +459,14 @@ async function runScanAndStructure(
     stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
   });
 
+  // ── Custom (non-tree-sitter) processors ─────────────────────────────
+  // Each custom processor follows the pattern in markdown-processor.ts:
+  //   1. Export a process function: (graph, files, allPathSet) => result
+  //   2. Export a file detection function: (path) => boolean
+  //   3. Filter files by extension, write nodes/edges directly to graph
+  // To add a new language: create a new processor file, import it here,
+  // and add a filter-read-call-log block following the pattern below.
+
   // ── Phase 2.5: Markdown processing (headings + cross-links) ────────
   const mdScanned = scannedFiles.filter(f => f.path.endsWith('.md') || f.path.endsWith('.mdx'));
   if (mdScanned.length > 0) {
