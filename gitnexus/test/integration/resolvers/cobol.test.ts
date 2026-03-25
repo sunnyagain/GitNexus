@@ -184,7 +184,7 @@ describe('COBOL full system extraction', () => {
 
     it('produces exactly 10 total ACCESSES edges', () => {
       const edges = getRelationships(result, 'ACCESSES');
-      expect(edges.length).toBe(10);
+      expect(edges.length).toBe(11);
     });
 
     // -- CALLS edges: cobol-perform -----------------------------------
@@ -737,7 +737,7 @@ describe('COBOL full system extraction', () => {
     it('produces exactly 10 total ACCESSES edges', () => {
       // 4 cobol-move-read + 5 cobol-move-write + 1 sql-select = 10
       const edges = getRelationships(result, 'ACCESSES');
-      expect(edges.length).toBe(10);
+      expect(edges.length).toBe(11);
     });
   });
 });

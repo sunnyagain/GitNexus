@@ -90,6 +90,8 @@ export interface CobolRegexResults {
     fileIsLiteral?: boolean;
     queueName?: string;
     labelName?: string;
+    intoField?: string;
+    fromField?: string;
   }>;
 
   // Phase 3: Linkage + Data Flow
@@ -524,7 +526,14 @@ function parseExecCicsBlock(block: string, line: number): CobolRegexResults['exe
     .trim();
 
   // Command: first keyword(s) — handle two-word commands like SEND MAP, RECEIVE MAP
-  const twoWordCommands = ['SEND MAP', 'RECEIVE MAP', 'SEND TEXT', 'SEND CONTROL', 'READ NEXT', 'READ PREV'];
+  const twoWordCommands = [
+    'SEND MAP', 'RECEIVE MAP', 'SEND TEXT', 'SEND CONTROL',
+    'READ NEXT', 'READ PREV',
+    'WRITEQ TS', 'WRITEQ TD', 'READQ TS', 'READQ TD',
+    'DELETEQ TS', 'DELETEQ TD',
+    'HANDLE ABEND', 'HANDLE AID', 'HANDLE CONDITION',
+    'START TRANSID',
+  ];
   let command = '';
   const upperBody = body.toUpperCase();
   for (const twoWord of twoWordCommands) {
@@ -569,6 +578,14 @@ function parseExecCicsBlock(block: string, line: number): CobolRegexResults['exe
   // HANDLE ABEND LABEL(paragraph-name) — error handler target
   const labelMatch = body.match(/\bLABEL\s*\(\s*([A-Z][A-Z0-9-]+)\s*\)/i);
   if (labelMatch) result.labelName = labelMatch[1];
+
+  // INTO(data-area) — data target (READ INTO, RECEIVE INTO, RETRIEVE INTO, READQ INTO)
+  const intoMatch = body.match(/\bINTO\s*\(\s*([A-Z][A-Z0-9-]+)\s*\)/i);
+  if (intoMatch) result.intoField = intoMatch[1];
+
+  // FROM(data-area) — data source (WRITE FROM, SEND FROM, WRITEQ FROM, START FROM)
+  const fromMatch = body.match(/\bFROM\s*\(\s*([A-Z][A-Z0-9-]+)\s*\)/i);
+  if (fromMatch) result.fromField = fromMatch[1];
 
   return result;
 }

@@ -576,6 +576,9 @@ function mapToGraph(
     }
   }
 
+  // ── Build data item Map early (needed by CICS INTO/FROM and MOVE) ──
+  const dataItemMap = buildDataItemMap(extracted.dataItems, filePath);
+
   // ── EXEC CICS blocks -> CodeElement nodes + CALLS edges ────────
   for (const cics of extracted.execCicsBlocks) {
     const cicsId = generateId('CodeElement', `${filePath}:exec-cics:L${cics.line}`);
@@ -607,7 +610,7 @@ function mapToGraph(
       reason: 'cobol-exec-cics',
     });
     // LINK/XCTL -> cross-program CALLS (handles both literal and variable PROGRAM)
-    if (cics.programName && (cics.command === 'LINK' || cics.command === 'XCTL')) {
+    if (cics.programName && ['LINK', 'XCTL', 'LOAD'].includes(cics.command)) {
       if (cics.programIsLiteral === false) {
         // Dynamic PROGRAM reference via variable — annotate, don't resolve
         graph.addNode({
@@ -640,11 +643,11 @@ function mapToGraph(
       }
     }
 
-    // CICS FILE I/O -> ACCESSES edges (READ/WRITE/REWRITE/DELETE/STARTBR FILE)
+    // CICS FILE I/O -> ACCESSES edges (READ/WRITE/REWRITE/DELETE/STARTBR/ENDBR FILE)
     if (cics.fileName) {
       const fileRecordId = generateId('Record', `${filePath}:${cics.fileName}`);
       const ioCommand = cics.command.toUpperCase();
-      const isRead = ['READ', 'STARTBR', 'READNEXT', 'READPREV', 'READ NEXT', 'READ PREV'].includes(ioCommand);
+      const isRead = ['READ', 'STARTBR', 'READNEXT', 'READPREV', 'READ NEXT', 'READ PREV', 'ENDBR'].includes(ioCommand);
       const isWrite = ['WRITE', 'REWRITE', 'DELETE'].includes(ioCommand);
       const reason = isRead ? 'cics-file-read' : isWrite ? 'cics-file-write' : 'cics-file-access';
       graph.addRelationship({
@@ -654,14 +657,67 @@ function mapToGraph(
       });
     }
 
-    // CICS QUEUE -> ACCESSES edge (WRITEQ/READQ TS/TD)
+    // CICS QUEUE -> ACCESSES edge with differentiated reason (WRITEQ/READQ/DELETEQ TS/TD)
     if (cics.queueName) {
       const queueId = generateId('Record', `<queue>:${cics.queueName}`);
+      const qCmd = cics.command.toUpperCase();
+      const qReason = qCmd.startsWith('READQ') ? 'cics-queue-read'
+        : qCmd.startsWith('WRITEQ') ? 'cics-queue-write'
+        : qCmd.startsWith('DELETEQ') ? 'cics-queue-delete'
+        : 'cics-queue';
       graph.addRelationship({
         id: generateId('ACCESSES', `${cicsId}->queue->${cics.queueName}:L${cics.line}`),
         type: 'ACCESSES', sourceId: cicsId, targetId: queueId,
-        confidence: 0.85, reason: 'cics-queue',
+        confidence: 0.85, reason: qReason,
       });
+    }
+
+    // CICS RETURN/START TRANSID -> CALLS edge (transaction flow)
+    if (cics.transId) {
+      const cmd = cics.command.toUpperCase();
+      if (cmd === 'RETURN' || cmd.startsWith('START')) {
+        const transNodeId = generateId('CodeElement', `<transid>:${cics.transId}`);
+        graph.addRelationship({
+          id: generateId('CALLS', `${parentId}->${cmd === 'RETURN' ? 'return' : 'start'}-transid->${cics.transId}:L${cics.line}`),
+          type: 'CALLS', sourceId: parentId, targetId: transNodeId,
+          confidence: 0.8,
+          reason: cmd === 'RETURN' ? 'cics-return-transid' : 'cics-start-transid',
+        });
+      }
+    }
+
+    // CICS MAP -> ACCESSES edge (screen/mapset traceability)
+    if (cics.mapName) {
+      const mapId = generateId('Record', `<map>:${cics.mapName}`);
+      graph.addRelationship({
+        id: generateId('ACCESSES', `${cicsId}->map->${cics.mapName}:L${cics.line}`),
+        type: 'ACCESSES', sourceId: cicsId, targetId: mapId,
+        confidence: 0.85, reason: 'cics-map',
+      });
+    }
+
+    // CICS INTO(data-area) -> ACCESSES edge (data write target)
+    if (cics.intoField) {
+      const intoPropId = dataItemMap.get(cics.intoField.toUpperCase());
+      if (intoPropId) {
+        graph.addRelationship({
+          id: generateId('ACCESSES', `${cicsId}->into->${cics.intoField}:L${cics.line}`),
+          type: 'ACCESSES', sourceId: cicsId, targetId: intoPropId,
+          confidence: 0.9, reason: 'cics-receive-into',
+        });
+      }
+    }
+
+    // CICS FROM(data-area) -> ACCESSES edge (data read source)
+    if (cics.fromField) {
+      const fromPropId = dataItemMap.get(cics.fromField.toUpperCase());
+      if (fromPropId) {
+        graph.addRelationship({
+          id: generateId('ACCESSES', `${cicsId}->from->${cics.fromField}:L${cics.line}`),
+          type: 'ACCESSES', sourceId: cicsId, targetId: fromPropId,
+          confidence: 0.9, reason: 'cics-send-from',
+        });
+      }
     }
 
     // CICS HANDLE ABEND LABEL -> CALLS edge to error handler paragraph
@@ -707,7 +763,6 @@ function mapToGraph(
   }
 
   // ── MOVE data flow -> ACCESSES edges (read/write) ──────────────
-  const dataItemMap = buildDataItemMap(extracted.dataItems, filePath);
   for (const move of extracted.moves) {
     const fromPropId = dataItemMap.get(move.from.toUpperCase());
     const callerId = move.caller
