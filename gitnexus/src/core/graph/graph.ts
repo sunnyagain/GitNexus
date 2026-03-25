@@ -36,6 +36,10 @@ export const createKnowledgeGraph = (): KnowledgeGraph => {
   /**
    * Remove all nodes (and their relationships) belonging to a file
    */
+  const removeRelationship = (relationshipId: string): boolean => {
+    return relationshipMap.delete(relationshipId);
+  };
+
   const removeNodesByFile = (filePath: string): number => {
     let removed = 0;
     for (const [nodeId, node] of nodeMap) {
@@ -75,6 +79,7 @@ export const createKnowledgeGraph = (): KnowledgeGraph => {
     addRelationship,
     removeNode,
     removeNodesByFile,
+    removeRelationship,
 
   };
 };
