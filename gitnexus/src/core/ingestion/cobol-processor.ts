@@ -704,6 +704,82 @@ function mapToGraph(
       reason: 'cobol-file-declaration',
     });
   }
+
+  // ── GO TO -> CALLS edges ──────────────────────────────────────
+  for (const gt of extracted.gotos) {
+    const callerId = gt.caller
+      ? (paraNodeIds.get(gt.caller.toUpperCase()) ?? parentId)
+      : parentId;
+    const targetId = paraNodeIds.get(gt.target.toUpperCase())
+      ?? sectionNodeIds.get(gt.target.toUpperCase());
+    if (targetId) {
+      graph.addRelationship({
+        id: generateId('CALLS', `${callerId}->goto->${gt.target}:L${gt.line}`),
+        type: 'CALLS',
+        sourceId: callerId,
+        targetId,
+        confidence: 1.0,
+        reason: 'cobol-goto',
+      });
+    }
+  }
+
+  // ── SORT/MERGE -> ACCESSES edges ──────────────────────────────
+  for (const sort of extracted.sorts) {
+    const sortFileId = generateId('Record', `${filePath}:${sort.sortFile}`);
+    if (sort.usingFile) {
+      const usingId = generateId('Record', `${filePath}:${sort.usingFile}`);
+      graph.addRelationship({
+        id: generateId('ACCESSES', `${parentId}->sort-using->${sort.usingFile}:L${sort.line}`),
+        type: 'ACCESSES',
+        sourceId: sortFileId,
+        targetId: usingId,
+        confidence: 0.85,
+        reason: 'sort-using',
+      });
+    }
+    if (sort.givingFile) {
+      const givingId = generateId('Record', `${filePath}:${sort.givingFile}`);
+      graph.addRelationship({
+        id: generateId('ACCESSES', `${parentId}->sort-giving->${sort.givingFile}:L${sort.line}`),
+        type: 'ACCESSES',
+        sourceId: sortFileId,
+        targetId: givingId,
+        confidence: 0.85,
+        reason: 'sort-giving',
+      });
+    }
+  }
+
+  // ── SEARCH -> ACCESSES edges ──────────────────────────────────
+  for (const search of extracted.searches) {
+    const targetPropId = dataItemMap.get(search.target.toUpperCase());
+    if (targetPropId) {
+      graph.addRelationship({
+        id: generateId('ACCESSES', `${parentId}->search->${search.target}:L${search.line}`),
+        type: 'ACCESSES',
+        sourceId: parentId,
+        targetId: targetPropId,
+        confidence: 0.9,
+        reason: 'cobol-search',
+      });
+    }
+  }
+
+  // ── CANCEL -> CALLS edges ──────────────────────────────────────
+  for (const cancel of extracted.cancels) {
+    const targetModuleId = moduleNodeIds.get(cancel.target.toUpperCase());
+    if (targetModuleId) {
+      graph.addRelationship({
+        id: generateId('CALLS', `${parentId}->cancel->${cancel.target}:L${cancel.line}`),
+        type: 'CALLS',
+        sourceId: parentId,
+        targetId: targetModuleId,
+        confidence: 0.9,
+        reason: 'cobol-cancel',
+      });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

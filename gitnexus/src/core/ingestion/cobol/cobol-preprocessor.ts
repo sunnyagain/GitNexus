@@ -50,7 +50,7 @@ export interface CobolRegexResults {
     occurs?: number;
     redefines?: string;
     values?: string[];
-    section: 'working-storage' | 'linkage' | 'file' | 'local-storage' | 'unknown';
+    section: 'working-storage' | 'linkage' | 'file' | 'local-storage' | 'screen' | 'unknown';
   }>;
   fileDeclarations: Array<{
     selectName: string;
@@ -101,6 +101,12 @@ export interface CobolRegexResults {
     caller: string | null;
     corresponding: boolean;
   }>;
+
+  // Phase 4: Additional structural features
+  gotos: Array<{ caller: string | null; target: string; line: number }>;
+  sorts: Array<{ sortFile: string; usingFile?: string; givingFile?: string; line: number }>;
+  searches: Array<{ target: string; line: number }>;
+  cancels: Array<{ target: string; line: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +173,7 @@ const EXCLUDED_PARA_NAMES = new Set([
 
 type Division = 'identification' | 'environment' | 'data' | 'procedure' | null;
 
-type DataSection = 'working-storage' | 'linkage' | 'file' | 'local-storage' | 'unknown';
+type DataSection = 'working-storage' | 'linkage' | 'file' | 'local-storage' | 'screen' | 'unknown';
 
 type EnvironmentSection = 'input-output' | 'configuration' | null;
 
@@ -176,7 +182,7 @@ type EnvironmentSection = 'input-output' | 'configuration' | null;
 // ---------------------------------------------------------------------------
 
 const RE_DIVISION = /\b(IDENTIFICATION|ENVIRONMENT|DATA|PROCEDURE)\s+DIVISION\b/i;
-const RE_SECTION = /\b(WORKING-STORAGE|LINKAGE|FILE|LOCAL-STORAGE|INPUT-OUTPUT|CONFIGURATION)\s+SECTION\b/i;
+const RE_SECTION = /\b(WORKING-STORAGE|LINKAGE|FILE|LOCAL-STORAGE|SCREEN|INPUT-OUTPUT|CONFIGURATION)\s+SECTION\b/i;
 
 // IDENTIFICATION DIVISION
 const RE_PROGRAM_ID = /\bPROGRAM-ID\.\s*([A-Z][A-Z0-9-]*)/i;
@@ -189,7 +195,7 @@ const RE_SELECT_START = /\bSELECT\s+([A-Z][A-Z0-9-]+)/i;
 
 // DATA DIVISION
 // ^\s* (not ^\s+) to support both fixed-format (indented) and free-format (trimmed)
-const RE_FD = /^\s*FD\s+([A-Z][A-Z0-9-]+)/i;
+const RE_FD = /^\s*(?:FD|SD|RD)\s+([A-Z][A-Z0-9-]+)/i;
 const RE_DATA_ITEM = /^\s*(\d{1,2})\s+([A-Z][A-Z0-9-]+)\s*(.*)/i;
 const RE_ANONYMOUS_REDEFINES = /^\s*(\d{1,2})\s+REDEFINES\s+([A-Z][A-Z0-9-]+)/i;
 const RE_88_LEVEL = /^\s*88\s+([A-Z][A-Z0-9-]+)\s+VALUES?\s+(?:ARE\s+)?(.+)/i;
@@ -213,6 +219,24 @@ const RE_COPY_QUOTED = /\bCOPY\s+(?:"([^"]+)"|'([^']+)')(?:\s|\.)/i;
 const RE_EXEC_SQL_START = /\bEXEC\s+SQL\b/i;
 const RE_EXEC_CICS_START = /\bEXEC\s+CICS\b/i;
 const RE_END_EXEC = /\bEND-EXEC\b/i;
+
+// GO TO — control flow transfer (same graph semantics as PERFORM)
+const RE_GOTO = /\bGO\s+TO\s+([A-Z][A-Z0-9-]+)/i;
+
+// SORT/MERGE file references
+const RE_SORT = /\bSORT\s+([A-Z][A-Z0-9-]+)/i;
+const RE_SORT_USING = /\bUSING\s+([A-Z][A-Z0-9-]+)/i;
+const RE_SORT_GIVING = /\bGIVING\s+([A-Z][A-Z0-9-]+)/i;
+const RE_MERGE = /\bMERGE\s+([A-Z][A-Z0-9-]+)/i;
+
+// SEARCH — table access
+const RE_SEARCH = /\bSEARCH\s+(?:ALL\s+)?([A-Z][A-Z0-9-]+)/i;
+
+// CANCEL — program lifecycle
+const RE_CANCEL = /\bCANCEL\s+(?:"([^"]+)"|'([^']+)')/i;
+
+// Level 66 RENAMES
+const RE_66_LEVEL = /^\s*66\s+([A-Z][A-Z0-9-]+)\s+RENAMES\s+([A-Z][A-Z0-9-]+)/i;
 
 // PROCEDURE DIVISION USING
 const RE_PROC_USING = /\bPROCEDURE\s+DIVISION\s+USING\s+([\s\S]*?)(?:\.|$)/i;
@@ -313,6 +337,14 @@ function parseDataItemClauses(rest: string): {
   const occursMatch = text.match(/\bOCCURS\s+(\d+)/i);
   if (occursMatch) {
     result.occurs = parseInt(occursMatch[1], 10);
+  }
+
+  // IS EXTERNAL / IS GLOBAL
+  if (/\bIS\s+EXTERNAL\b/i.test(text)) {
+    result.usage = (result.usage ?? '') + ' external';
+  }
+  if (/\bIS\s+GLOBAL\b/i.test(text)) {
+    result.usage = (result.usage ?? '') + ' global';
   }
 
   return result;
@@ -549,6 +581,10 @@ export function extractCobolSymbolsWithRegex(
     procedureUsing: [],
     entryPoints: [],
     moves: [],
+    gotos: [],
+    sorts: [],
+    searches: [],
+    cancels: [],
   };
 
   // --- State ---
@@ -768,6 +804,7 @@ export function extractCobolSymbolsWithRegex(
         case 'LINKAGE':         currentDivision = 'data'; currentDataSection = 'linkage'; break;
         case 'FILE':            currentDivision = 'data'; currentDataSection = 'file'; break;
         case 'LOCAL-STORAGE':   currentDivision = 'data'; currentDataSection = 'local-storage'; break;
+        case 'SCREEN':          currentDivision = 'data'; currentDataSection = 'screen'; break;
         case 'INPUT-OUTPUT':    currentDivision = 'environment'; currentEnvSection = 'input-output'; break;
         case 'CONFIGURATION':   currentDivision = 'environment'; currentEnvSection = 'configuration'; break;
       }
@@ -911,6 +948,19 @@ export function extractCobolSymbolsWithRegex(
       return;
     }
 
+    // Level 66 RENAMES
+    const lv66Match = line.match(RE_66_LEVEL);
+    if (lv66Match) {
+      result.dataItems.push({
+        name: lv66Match[1],
+        level: 66,
+        line: lineNum,
+        redefines: lv66Match[2], // RENAMES target stored as redefines
+        section: currentDataSection,
+      });
+      return;
+    }
+
     // Anonymous REDEFINES (no name, e.g. "01 REDEFINES WK-PERIVAL.")
     const anonRedefMatch = line.match(RE_ANONYMOUS_REDEFINES);
     if (anonRedefMatch) {
@@ -1048,6 +1098,49 @@ export function extractCobolSymbolsWithRegex(
           });
         }
       }
+    }
+
+    // GO TO — control flow transfer
+    const gotoMatch = line.match(RE_GOTO);
+    if (gotoMatch) {
+      result.gotos.push({ caller: currentParagraph, target: gotoMatch[1], line: lineNum });
+    }
+
+    // SORT / MERGE file references
+    const sortMatch = line.match(RE_SORT);
+    if (sortMatch) {
+      const usingMatch = line.match(RE_SORT_USING);
+      const givingMatch = line.match(RE_SORT_GIVING);
+      result.sorts.push({
+        sortFile: sortMatch[1],
+        usingFile: usingMatch?.[1],
+        givingFile: givingMatch?.[1],
+        line: lineNum,
+      });
+    } else {
+      const mergeMatch = line.match(RE_MERGE);
+      if (mergeMatch) {
+        const usingMatch = line.match(RE_SORT_USING);
+        const givingMatch = line.match(RE_SORT_GIVING);
+        result.sorts.push({
+          sortFile: mergeMatch[1],
+          usingFile: usingMatch?.[1],
+          givingFile: givingMatch?.[1],
+          line: lineNum,
+        });
+      }
+    }
+
+    // SEARCH — table access
+    const searchMatch = line.match(RE_SEARCH);
+    if (searchMatch) {
+      result.searches.push({ target: searchMatch[1], line: lineNum });
+    }
+
+    // CANCEL — program lifecycle
+    const cancelMatch = line.match(RE_CANCEL);
+    if (cancelMatch) {
+      result.cancels.push({ target: cancelMatch[1] ?? cancelMatch[2], line: lineNum });
     }
   }
 }
