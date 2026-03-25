@@ -21,25 +21,25 @@ describe('parseReplacingClause', () => {
     expect(result).toEqual([{ type: 'TRAILING', from: '-IN', to: '-OUT' }]);
   });
 
-  // Pseudotext ==...== support
+  // Pseudotext ==...== support (isPseudotext flag propagated)
   it('parses basic pseudotext: ==OLD== BY ==NEW==', () => {
     const result = parseReplacingClause(' ==WS-OLD== BY ==WS-NEW== ');
-    expect(result).toEqual([{ type: 'EXACT', from: 'WS-OLD', to: 'WS-NEW' }]);
+    expect(result).toEqual([{ type: 'EXACT', from: 'WS-OLD', to: 'WS-NEW', isPseudotext: true }]);
   });
 
   it('parses empty pseudotext (deletion): ==TEXT== BY ====', () => {
     const result = parseReplacingClause(' ==REMOVE-ME== BY ==== ');
-    expect(result).toEqual([{ type: 'EXACT', from: 'REMOVE-ME', to: '' }]);
+    expect(result).toEqual([{ type: 'EXACT', from: 'REMOVE-ME', to: '', isPseudotext: true }]);
   });
 
   it('parses pseudotext with spaces: ==SOME TEXT== BY ==OTHER TEXT==', () => {
     const result = parseReplacingClause(' ==WORKING STORAGE== BY ==LOCAL STORAGE== ');
-    expect(result).toEqual([{ type: 'EXACT', from: 'WORKING STORAGE', to: 'LOCAL STORAGE' }]);
+    expect(result).toEqual([{ type: 'EXACT', from: 'WORKING STORAGE', to: 'LOCAL STORAGE', isPseudotext: true }]);
   });
 
   it('parses pseudotext with single = inside: ==A=B== BY ==C=D==', () => {
     const result = parseReplacingClause(' ==A=B== BY ==C=D== ');
-    expect(result).toEqual([{ type: 'EXACT', from: 'A=B', to: 'C=D' }]);
+    expect(result).toEqual([{ type: 'EXACT', from: 'A=B', to: 'C=D', isPseudotext: true }]);
   });
 
   it('parses mixed quoted + pseudotext in one clause', () => {
@@ -48,7 +48,7 @@ describe('parseReplacingClause', () => {
     );
     expect(result).toEqual([
       { type: 'EXACT', from: 'OLD-NAME', to: 'NEW-NAME' },
-      { type: 'EXACT', from: 'DEL-PREFIX', to: '' },
+      { type: 'EXACT', from: 'DEL-PREFIX', to: '', isPseudotext: true },
     ]);
   });
 
@@ -58,7 +58,7 @@ describe('parseReplacingClause', () => {
     );
     expect(result).toEqual([
       { type: 'LEADING', from: 'ESP-', to: 'LK-ESP-' },
-      { type: 'EXACT', from: 'OLD-EXACT', to: 'NEW-EXACT' },
+      { type: 'EXACT', from: 'OLD-EXACT', to: 'NEW-EXACT', isPseudotext: true },
     ]);
   });
 

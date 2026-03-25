@@ -24,6 +24,7 @@ export interface CopyReplacing {
   type: 'LEADING' | 'TRAILING' | 'EXACT';
   from: string;
   to: string;
+  isPseudotext?: boolean;
 }
 
 export interface CopyResolution {
@@ -193,7 +194,7 @@ export function parseReplacingClause(text: string): CopyReplacing[] {
     const toToken = tokens[i];
     i++;
 
-    replacings.push({ type, from: fromToken.value, to: toToken.value });
+    replacings.push({ type, from: fromToken.value, to: toToken.value, isPseudotext: fromToken.isPseudotext || undefined });
   }
 
   return replacings;
@@ -309,7 +310,7 @@ function applyReplacing(content: string, replacings: CopyReplacing[]): string {
   // characters (pseudotext). These cannot be handled by identifier-level matching.
   let result = content;
   for (const r of replacings) {
-    if (r.type === 'EXACT' && (r.from.includes(' ') || !/^[A-Z][A-Z0-9-]*$/i.test(r.from))) {
+    if (r.type === 'EXACT' && (r.isPseudotext || r.from.includes(' ') || !/^[A-Z][A-Z0-9-]*$/i.test(r.from))) {
       const escaped = r.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const re = new RegExp(escaped, 'gi');
       result = result.replace(re, r.to);
@@ -318,7 +319,7 @@ function applyReplacing(content: string, replacings: CopyReplacing[]): string {
 
   // Second pass: identifier-level replacements (LEADING, TRAILING, single-word EXACT)
   const identifierReplacings = replacings.filter(
-    r => !(r.type === 'EXACT' && (r.from.includes(' ') || !/^[A-Z][A-Z0-9-]*$/i.test(r.from))),
+    r => !(r.type === 'EXACT' && (r.isPseudotext || r.from.includes(' ') || !/^[A-Z][A-Z0-9-]*$/i.test(r.from))),
   );
   if (identifierReplacings.length === 0) return result;
 
