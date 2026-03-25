@@ -311,7 +311,7 @@ export function calculateEntryPointScore(
     // Check positive patterns
     const allPatterns = MERGED_ENTRY_POINT_PATTERNS[language];
     
-    if (allPatterns.some(p => p.test(name))) {
+    if (allPatterns?.some(p => p.test(name))) {
       nameMultiplier = 1.5;  // Bonus for matching entry point pattern
       reasons.push('entry-pattern');
     }

@@ -121,6 +121,11 @@ export interface CobolRegexResults {
  * Preserves exact line count for position mapping.
  */
 export function preprocessCobolSource(content: string): string {
+  // Skip preprocessing for free-format COBOL — cols 1-6 are program text, not sequence area
+  if (/>>SOURCE\s+(?:FORMAT\s+(?:IS\s+)?)?FREE/i.test(content.substring(0, 500))) {
+    return content;
+  }
+
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -146,6 +151,14 @@ const EXCLUDED_PARA_NAMES = new Set([
   'ENVIRONMENT', 'DATA', 'WORKING-STORAGE', 'LINKAGE',
   'FILE', 'LOCAL-STORAGE', 'COMMUNICATION', 'REPORT',
   'SCREEN', 'INPUT-OUTPUT', 'CONFIGURATION',
+  // COBOL verbs that appear alone on a line with period (false-positive in free-format)
+  'GOBACK', 'STOP', 'EXIT', 'CONTINUE', 'END-READ', 'END-WRITE',
+  'END-REWRITE', 'END-DELETE', 'END-START', 'END-RETURN',
+  'END-PERFORM', 'END-IF', 'END-EVALUATE', 'END-SEARCH',
+  'END-COMPUTE', 'END-ADD', 'END-SUBTRACT', 'END-MULTIPLY',
+  'END-DIVIDE', 'END-STRING', 'END-UNSTRING', 'END-ACCEPT',
+  'END-DISPLAY', 'END-CALL', 'END-INVOKE', 'END-XML',
+  'END-JSON', 'END-EXEC',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -181,8 +194,9 @@ const RE_ANONYMOUS_REDEFINES = /^\s+(\d{1,2})\s+REDEFINES\s+([A-Z][A-Z0-9-]+)/i;
 const RE_88_LEVEL = /^\s+88\s+([A-Z][A-Z0-9-]+)\s+VALUES?\s+(?:ARE\s+)?(.+)/i;
 
 // PROCEDURE DIVISION
-const RE_PROC_SECTION = /^       ([A-Z][A-Z0-9-]+)\s+SECTION\.\s*$/;
-const RE_PROC_PARAGRAPH = /^       ([A-Z][A-Z0-9-]+)\.\s*$/;
+// These patterns support both fixed-format (7 leading spaces) and free-format (any indentation)
+const RE_PROC_SECTION = /^\s*([A-Z][A-Z0-9-]+)\s+SECTION\.\s*$/i;
+const RE_PROC_PARAGRAPH = /^\s*([A-Z][A-Z0-9-]+)\.\s*$/i;
 const RE_PERFORM = /\bPERFORM\s+([A-Z][A-Z0-9-]+)(?:\s+THRU\s+([A-Z][A-Z0-9-]+))?/i;
 
 // ALL DIVISIONS
@@ -560,9 +574,37 @@ export function extractCobolSymbolsWithRegex(
   let pendingLine: string | null = null;
   let pendingLineNumber = 0;
 
+  // --- Detect source format: free vs fixed ---
+  // GnuCOBOL uses >>SOURCE FREE directive, typically in first 5 lines
+  let isFreeFormat = false;
+  for (let i = 0; i < Math.min(rawLines.length, 10); i++) {
+    if (/>>SOURCE\s+(?:FORMAT\s+(?:IS\s+)?)?FREE/i.test(rawLines[i])) {
+      isFreeFormat = true;
+      break;
+    }
+  }
+
   // --- Process each raw line ---
   for (let i = 0; i < rawLines.length; i++) {
     const raw = rawLines[i];
+
+    if (isFreeFormat) {
+      // FREE FORMAT: no column-position rules
+      // Skip >>SOURCE directive lines
+      if (/^[ \t]*>>/.test(raw)) continue;
+      // Skip free-format comment lines (*> at start of content)
+      const trimmed = raw.trimStart();
+      if (trimmed.startsWith('*>') || trimmed.length === 0) continue;
+      // Strip inline *> comments
+      const commentIdx = raw.indexOf('*>');
+      const line = commentIdx >= 0 ? raw.substring(0, commentIdx) : raw;
+      // Free-format lines are logical lines (no continuation indicator)
+      const lineNum = i + 1;
+      processLogicalLine(line.trim(), lineNum);
+      continue;
+    }
+
+    // FIXED FORMAT: column-position-based processing
 
     // Skip lines too short to have indicator area
     if (raw.length < 7) {
@@ -932,7 +974,7 @@ export function extractCobolSymbolsWithRegex(
     const secMatch = line.match(RE_PROC_SECTION);
     if (secMatch) {
       const name = secMatch[1];
-      if (!EXCLUDED_PARA_NAMES.has(name) && !name.includes('DIVISION')) {
+      if (!EXCLUDED_PARA_NAMES.has(name.toUpperCase()) && !name.toUpperCase().includes('DIVISION')) {
         result.sections.push({ name, line: lineNum });
         currentParagraph = name;
       }
@@ -943,7 +985,7 @@ export function extractCobolSymbolsWithRegex(
     const paraMatch = line.match(RE_PROC_PARAGRAPH);
     if (paraMatch) {
       const name = paraMatch[1];
-      if (!EXCLUDED_PARA_NAMES.has(name) && !name.includes('DIVISION') && !name.includes('SECTION')) {
+      if (!EXCLUDED_PARA_NAMES.has(name.toUpperCase()) && !name.toUpperCase().includes('DIVISION') && !name.toUpperCase().includes('SECTION')) {
         result.paragraphs.push({ name, line: lineNum });
         currentParagraph = name;
       }
