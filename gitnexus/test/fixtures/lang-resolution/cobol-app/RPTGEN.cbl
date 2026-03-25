@@ -8,6 +8,9 @@
        01 WS-SQL-CODE              PIC S9(9) COMP.
        01 WS-COUNT                 PIC 9(4).
        01 WS-MAP-NAME              PIC X(8).
+       01 WS-SORT-FILE             PIC X(8).
+       01 WS-QUEUE-NAME            PIC X(16).
+       01 WS-NEXT-PGM              PIC X(8).
 
        PROCEDURE DIVISION.
        MAIN-PARAGRAPH.
@@ -15,7 +18,7 @@
            PERFORM FORMAT-REPORT
            PERFORM SEND-SCREEN
            CALL "CUSTUPDT"
-           STOP RUN.
+           GO TO EXIT-PARAGRAPH.
 
        FETCH-DATA.
            EXEC SQL
@@ -28,11 +31,15 @@
            PERFORM WS-COUNT TIMES
                MOVE WS-CUST-CODE TO WS-REPORT-LINE
            END-PERFORM
-           PERFORM MAIN-PARAGRAPH THRU FORMAT-REPORT.
+           PERFORM MAIN-PARAGRAPH THRU FORMAT-REPORT
+           SORT WS-SORT-FILE USING CUSTOMER-DATA
+               GIVING WS-REPORT-LINE
+           SEARCH WS-CUSTOMER-DATA.
 
        SEND-SCREEN.
            EXEC CICS
                SEND MAP(WS-MAP-NAME) MAPSET('CUSTSET')
+               FROM(WS-REPORT-LINE)
            END-EXEC.
 
            EXEC CICS
@@ -42,3 +49,31 @@
            EXEC CICS
                XCTL PROGRAM('CUSTUPDT')
            END-EXEC.
+
+           EXEC CICS
+               READ FILE('CUSTFILE')
+               INTO(WS-CUSTOMER-DATA)
+           END-EXEC.
+
+           EXEC CICS
+               WRITEQ TS QUEUE('RPTQUEUE')
+               FROM(WS-REPORT-LINE)
+           END-EXEC.
+
+           EXEC CICS
+               HANDLE ABEND LABEL(ABEND-HANDLER)
+           END-EXEC.
+
+           EXEC CICS
+               RETURN TRANSID('RPTG')
+           END-EXEC.
+
+           EXEC CICS
+               XCTL PROGRAM(WS-NEXT-PGM)
+           END-EXEC.
+
+       ABEND-HANDLER.
+           DISPLAY 'ABEND OCCURRED'.
+
+       EXIT-PARAGRAPH.
+           STOP RUN.
