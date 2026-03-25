@@ -165,7 +165,7 @@ export const processCobol = (
     mapToGraph(graph, extracted, file, copyResolutions, moduleNodeIds);
 
     // Accumulate stats
-    result.programs += extracted.programName ? 1 : 0;
+    result.programs += (extracted.programName ? 1 : 0) + extracted.nestedPrograms.length;
     result.paragraphs += extracted.paragraphs.length;
     result.sections += extracted.sections.length;
     result.dataItems += extracted.dataItems.length;
@@ -308,6 +308,37 @@ function mapToGraph(
       reason: 'cobol-program-id',
     });
     moduleNodeIds.set(extracted.programName.toUpperCase(), moduleId);
+  }
+
+  // ── Nested programs -> additional Module nodes ───────────────────
+  // Nested programs (multiple PROGRAM-ID per file) produce separate Module
+  // nodes contained by the outer module. Their paragraphs/data items are
+  // not yet scoped per-program (all attributed to the outer module).
+  for (const nested of extracted.nestedPrograms) {
+    const nestedModuleId = generateId('Module', `${filePath}:${nested.name}`);
+    graph.addNode({
+      id: nestedModuleId,
+      label: 'Module',
+      properties: {
+        name: nested.name,
+        filePath,
+        startLine: nested.line,
+        endLine: nested.line,
+        language: 'cobol' as any,
+        isExported: true,
+        description: 'nested-program',
+      },
+    });
+    const nestedParent = moduleId ?? fileNodeId;
+    graph.addRelationship({
+      id: generateId('CONTAINS', `${nestedParent}->${nestedModuleId}`),
+      type: 'CONTAINS',
+      sourceId: nestedParent,
+      targetId: nestedModuleId,
+      confidence: 1.0,
+      reason: 'cobol-nested-program',
+    });
+    moduleNodeIds.set(nested.name.toUpperCase(), nestedModuleId);
   }
 
   const parentId = moduleId ?? fileNodeId;

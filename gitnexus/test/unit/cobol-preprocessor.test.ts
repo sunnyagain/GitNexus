@@ -91,6 +91,25 @@ describe('extractCobolSymbolsWithRegex', () => {
       expect(r.programName).toBe('TESTPROG');
     });
 
+    it('captures nested PROGRAM-IDs in nestedPrograms array', () => {
+      const src = cobol(
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. OUTER-PROG.',
+        '      PROCEDURE DIVISION.',
+        '       MAIN-PARA.',
+        '           DISPLAY "OUTER".',
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. INNER-PROG.',
+        '      PROCEDURE DIVISION.',
+        '       INNER-PARA.',
+        '           DISPLAY "INNER".',
+      );
+      const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
+      expect(r.programName).toBe('OUTER-PROG');
+      expect(r.nestedPrograms).toHaveLength(1);
+      expect(r.nestedPrograms[0].name).toBe('INNER-PROG');
+    });
+
     it('returns null programName for content without PROGRAM-ID', () => {
       const src = cobol(
         '      IDENTIFICATION DIVISION.',

@@ -34,6 +34,8 @@
 
 export interface CobolRegexResults {
   programName: string | null;
+  /** Additional PROGRAM-IDs found in the same file (nested programs). */
+  nestedPrograms: Array<{ name: string; line: number }>;
   paragraphs: Array<{ name: string; line: number }>;
   sections: Array<{ name: string; line: number }>;
   performs: Array<{ caller: string | null; target: string; thruTarget?: string; line: number }>;
@@ -516,6 +518,7 @@ export function extractCobolSymbolsWithRegex(
 
   const result: CobolRegexResults = {
     programName: null,
+    nestedPrograms: [],
     paragraphs: [],
     sections: [],
     performs: [],
@@ -736,13 +739,16 @@ export function extractCobolSymbolsWithRegex(
   // =========================================================================
   // IDENTIFICATION DIVISION extraction
   // =========================================================================
-  function extractIdentification(line: string, _lineNum: number): void {
-    if (result.programName === null) {
-      const m = line.match(RE_PROGRAM_ID);
-      if (m) {
+  function extractIdentification(line: string, lineNum: number): void {
+    const m = line.match(RE_PROGRAM_ID);
+    if (m) {
+      if (result.programName === null) {
         result.programName = m[1];
-        return;
+      } else {
+        // Nested program — additional PROGRAM-ID in the same file
+        result.nestedPrograms.push({ name: m[1], line: lineNum });
       }
+      return;
     }
 
     const authorMatch = line.match(RE_AUTHOR);
