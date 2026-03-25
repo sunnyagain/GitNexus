@@ -25,6 +25,14 @@
        01 WS-AMOUNT                PIC 9(7)V99.
        01 WS-EOF                   PIC 9 VALUE 0.
            88 END-OF-FILE          VALUE 1.
+       01 WS-AMT                   PIC 9(5)V99.
+       01 WS-PROG-NAME             PIC X(8).
+       01 FIELD-A                  PIC 9(5)V99.
+       01 FIELD-B                  PIC 9(5)V99.
+           COPY COPYLIB REPLACING ==PREFIX-== BY ==WS-==.
+
+       LINKAGE SECTION.
+       01 LS-PARAM                 PIC X(20).
 
        PROCEDURE DIVISION.
        INIT-SECTION SECTION.
@@ -41,7 +49,8 @@
        PROCESSING-SECTION SECTION.
        PROCESS-PARAGRAPH.
            PERFORM READ-CUSTOMER THRU WRITE-CUSTOMER
-           CALL "AUDITLOG" USING CUST-ID WS-AMOUNT.
+           CALL "AUDITLOG" USING CUST-ID WS-AMOUNT
+           CALL WS-PROG-NAME.
 
        READ-CUSTOMER.
            READ CUSTOMER-FILE
@@ -51,10 +60,15 @@
 
        UPDATE-BALANCE.
            ADD WS-AMOUNT TO CUST-BALANCE
-           MOVE WS-AMOUNT TO CUST-BALANCE.
+           MOVE WS-AMOUNT TO CUST-BALANCE
+           MOVE WS-AMT TO FIELD-A FIELD-B.
 
        WRITE-CUSTOMER.
            REWRITE CUSTOMER-RECORD.
 
        CLEANUP-PARAGRAPH.
            CLOSE CUSTOMER-FILE.
+
+       ENTRY 'ALTENTRY' USING LS-PARAM.
+           DISPLAY 'ALTERNATE ENTRY POINT'
+           GOBACK.

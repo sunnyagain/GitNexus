@@ -6,6 +6,8 @@
            COPY CUSTDAT.
        01 WS-REPORT-LINE           PIC X(132).
        01 WS-SQL-CODE              PIC S9(9) COMP.
+       01 WS-COUNT                 PIC 9(4).
+       01 WS-MAP-NAME              PIC X(8).
 
        PROCEDURE DIVISION.
        MAIN-PARAGRAPH.
@@ -23,12 +25,14 @@
            END-EXEC.
 
        FORMAT-REPORT.
-           MOVE WS-CUST-CODE TO WS-REPORT-LINE
+           PERFORM WS-COUNT TIMES
+               MOVE WS-CUST-CODE TO WS-REPORT-LINE
+           END-PERFORM
            PERFORM MAIN-PARAGRAPH THRU FORMAT-REPORT.
 
        SEND-SCREEN.
            EXEC CICS
-               SEND MAP('CUSTRPT') MAPSET('CUSTSET')
+               SEND MAP(WS-MAP-NAME) MAPSET('CUSTSET')
            END-EXEC.
 
            EXEC CICS
