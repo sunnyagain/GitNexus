@@ -244,15 +244,32 @@ export const processCobol = (
 // Graph mapping
 // ---------------------------------------------------------------------------
 
-/** Resolve a data item name to its Property node id, if it exists and is not FILLER. */
-function findDataItemNode(
-  name: string,
+/** Generate a deterministic Property node ID using composite key (section:level:name). */
+function generatePropertyId(
+  filePath: string,
+  item: { section: string; level: number; name: string },
+): string {
+  return generateId('Property', `${filePath}:${item.section}:${item.level}:${item.name}`);
+}
+
+/**
+ * Build a lookup Map from data item name (uppercase) to its Property node ID.
+ * First-wins semantics: if the same name appears in multiple sections,
+ * the first occurrence in extraction order is used for MOVE edge resolution.
+ */
+function buildDataItemMap(
   dataItems: CobolRegexResults['dataItems'],
   filePath: string,
-): string | undefined {
-  const item = dataItems.find(d => d.name.toUpperCase() === name.toUpperCase());
-  if (!item || item.name === 'FILLER') return undefined;
-  return generateId('Property', `${filePath}:${item.name}`);
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const item of dataItems) {
+    if (item.name === 'FILLER') continue;
+    const key = item.name.toUpperCase();
+    if (!map.has(key)) {
+      map.set(key, generatePropertyId(filePath, item));
+    }
+  }
+  return map;
 }
 
 function mapToGraph(
@@ -362,7 +379,7 @@ function mapToGraph(
   // ── Data items -> Property nodes ─────────────────────────────────
   for (const item of extracted.dataItems) {
     if (item.name === 'FILLER') continue; // Skip anonymous fillers
-    const propId = generateId('Property', `${filePath}:${item.name}`);
+    const propId = generatePropertyId(filePath, item);
     graph.addNode({
       id: propId,
       label: 'Property',
@@ -559,9 +576,10 @@ function mapToGraph(
   }
 
   // ── MOVE data flow -> ACCESSES edges (read/write) ──────────────
+  const dataItemMap = buildDataItemMap(extracted.dataItems, filePath);
   for (const move of extracted.moves) {
-    const fromPropId = findDataItemNode(move.from, extracted.dataItems, filePath);
-    const toPropId = findDataItemNode(move.to, extracted.dataItems, filePath);
+    const fromPropId = dataItemMap.get(move.from.toUpperCase());
+    const toPropId = dataItemMap.get(move.to.toUpperCase());
     const callerId = move.caller
       ? (paraNodeIds.get(move.caller.toUpperCase()) ?? parentId)
       : parentId;
