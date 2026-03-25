@@ -188,10 +188,11 @@ const RE_DATE_WRITTEN = /^\s+DATE-WRITTEN\.\s*(.+)/i;
 const RE_SELECT_START = /\bSELECT\s+([A-Z][A-Z0-9-]+)/i;
 
 // DATA DIVISION
-const RE_FD = /^\s+FD\s+([A-Z][A-Z0-9-]+)/i;
-const RE_DATA_ITEM = /^\s+(\d{1,2})\s+([A-Z][A-Z0-9-]+)\s*(.*)/i;
-const RE_ANONYMOUS_REDEFINES = /^\s+(\d{1,2})\s+REDEFINES\s+([A-Z][A-Z0-9-]+)/i;
-const RE_88_LEVEL = /^\s+88\s+([A-Z][A-Z0-9-]+)\s+VALUES?\s+(?:ARE\s+)?(.+)/i;
+// ^\s* (not ^\s+) to support both fixed-format (indented) and free-format (trimmed)
+const RE_FD = /^\s*FD\s+([A-Z][A-Z0-9-]+)/i;
+const RE_DATA_ITEM = /^\s*(\d{1,2})\s+([A-Z][A-Z0-9-]+)\s*(.*)/i;
+const RE_ANONYMOUS_REDEFINES = /^\s*(\d{1,2})\s+REDEFINES\s+([A-Z][A-Z0-9-]+)/i;
+const RE_88_LEVEL = /^\s*88\s+([A-Z][A-Z0-9-]+)\s+VALUES?\s+(?:ARE\s+)?(.+)/i;
 
 // PROCEDURE DIVISION
 // These patterns support both fixed-format (7 leading spaces) and free-format (any indentation)
