@@ -34,8 +34,8 @@
 
 export interface CobolRegexResults {
   programName: string | null;
-  /** Additional PROGRAM-IDs found in the same file (nested programs). */
-  nestedPrograms: Array<{ name: string; line: number }>;
+  /** All programs in this file with line-range boundaries for per-program scoping. */
+  programs: Array<{ name: string; startLine: number; endLine: number; nestingDepth: number }>;
   paragraphs: Array<{ name: string; line: number }>;
   sections: Array<{ name: string; line: number }>;
   performs: Array<{ caller: string | null; target: string; thruTarget?: string; line: number }>;
@@ -167,6 +167,7 @@ const RE_SECTION = /\b(WORKING-STORAGE|LINKAGE|FILE|LOCAL-STORAGE|INPUT-OUTPUT|C
 
 // IDENTIFICATION DIVISION
 const RE_PROGRAM_ID = /\bPROGRAM-ID\.\s*([A-Z][A-Z0-9-]*)/i;
+const RE_END_PROGRAM = /\bEND\s+PROGRAM\s+([A-Z][A-Z0-9-]*)\s*\./i;
 const RE_AUTHOR = /^\s+AUTHOR\.\s*(.+)/i;
 const RE_DATE_WRITTEN = /^\s+DATE-WRITTEN\.\s*(.+)/i;
 
@@ -518,7 +519,7 @@ export function extractCobolSymbolsWithRegex(
 
   const result: CobolRegexResults = {
     programName: null,
-    nestedPrograms: [],
+    programs: [],
     paragraphs: [],
     sections: [],
     performs: [],
@@ -540,6 +541,9 @@ export function extractCobolSymbolsWithRegex(
   let currentDataSection: DataSection = 'unknown';
   let currentEnvSection: EnvironmentSection = null;
   let currentParagraph: string | null = null;
+
+  // Program boundary stack for nested PROGRAM-ID / END PROGRAM tracking
+  const programBoundaryStack: Array<{ name: string; startLine: number }> = [];
 
   // SELECT accumulator (multi-line)
   let selectAccum: string | null = null;
@@ -616,6 +620,22 @@ export function extractCobolSymbolsWithRegex(
     pendingFdName = null;
   }
 
+  // Finalize any remaining programs on the boundary stack (e.g., single-program
+  // files without END PROGRAM, or outermost programs in nested files)
+  while (programBoundaryStack.length > 0) {
+    const topProgram = programBoundaryStack.pop()!;
+    result.programs.push({
+      name: topProgram.name,
+      startLine: topProgram.startLine,
+      endLine: rawLines.length,
+      nestingDepth: programBoundaryStack.length,
+    });
+  }
+  // Sort by startLine so outer programs come first
+  if (result.programs.length > 1) {
+    result.programs.sort((a, b) => a.startLine - b.startLine);
+  }
+
   return result;
 
   // =========================================================================
@@ -651,6 +671,21 @@ export function extractCobolSymbolsWithRegex(
       if (RE_END_EXEC.test(line)) {
         result.execCicsBlocks.push(parseExecCicsBlock(execAccum.lines, execAccum.startLine));
         execAccum = null;
+      }
+      return;
+    }
+
+    // --- END PROGRAM boundary detection ---
+    const endProgramMatch = line.match(RE_END_PROGRAM);
+    if (endProgramMatch) {
+      const topProgram = programBoundaryStack.pop();
+      if (topProgram) {
+        result.programs.push({
+          name: topProgram.name,
+          startLine: topProgram.startLine,
+          endLine: lineNum,
+          nestingDepth: programBoundaryStack.length,
+        });
       }
       return;
     }
@@ -744,10 +779,16 @@ export function extractCobolSymbolsWithRegex(
     if (m) {
       if (result.programName === null) {
         result.programName = m[1];
-      } else {
-        // Nested program — additional PROGRAM-ID in the same file
-        result.nestedPrograms.push({ name: m[1], line: lineNum });
       }
+
+      // Reset state machine for new program (nested or sibling)
+      currentDivision = 'identification';
+      currentDataSection = 'unknown';
+      currentEnvSection = null;
+      currentParagraph = null;
+
+      // Push program boundary for line-range tracking
+      programBoundaryStack.push({ name: m[1], startLine: lineNum });
       return;
     }
 

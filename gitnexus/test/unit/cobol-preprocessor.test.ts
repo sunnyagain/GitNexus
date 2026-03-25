@@ -91,7 +91,7 @@ describe('extractCobolSymbolsWithRegex', () => {
       expect(r.programName).toBe('TESTPROG');
     });
 
-    it('captures nested PROGRAM-IDs in nestedPrograms array', () => {
+    it('captures all PROGRAM-IDs in programs array with line ranges', () => {
       const src = cobol(
         '      IDENTIFICATION DIVISION.',
         '       PROGRAM-ID. OUTER-PROG.',
@@ -103,11 +103,19 @@ describe('extractCobolSymbolsWithRegex', () => {
         '      PROCEDURE DIVISION.',
         '       INNER-PARA.',
         '           DISPLAY "INNER".',
+        '       END PROGRAM INNER-PROG.',
+        '       END PROGRAM OUTER-PROG.',
       );
       const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
       expect(r.programName).toBe('OUTER-PROG');
-      expect(r.nestedPrograms).toHaveLength(1);
-      expect(r.nestedPrograms[0].name).toBe('INNER-PROG');
+      expect(r.programs).toHaveLength(2);
+      expect(r.programs[0].name).toBe('OUTER-PROG');
+      expect(r.programs[0].nestingDepth).toBe(0);
+      expect(r.programs[1].name).toBe('INNER-PROG');
+      expect(r.programs[1].nestingDepth).toBe(1);
+      // INNER-PROG's startLine < endLine, contained within OUTER-PROG
+      expect(r.programs[1].startLine).toBeGreaterThan(r.programs[0].startLine);
+      expect(r.programs[1].endLine).toBeLessThan(r.programs[0].endLine);
     });
 
     it('returns null programName for content without PROGRAM-ID', () => {

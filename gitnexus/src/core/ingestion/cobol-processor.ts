@@ -165,7 +165,7 @@ export const processCobol = (
     mapToGraph(graph, extracted, file, copyResolutions, moduleNodeIds);
 
     // Accumulate stats
-    result.programs += (extracted.programName ? 1 : 0) + extracted.nestedPrograms.length;
+    result.programs += extracted.programs.length || (extracted.programName ? 1 : 0);
     result.paragraphs += extracted.paragraphs.length;
     result.sections += extracted.sections.length;
     result.dataItems += extracted.dataItems.length;
@@ -311,25 +311,36 @@ function mapToGraph(
   }
 
   // ── Nested programs -> additional Module nodes ───────────────────
-  // Nested programs (multiple PROGRAM-ID per file) produce separate Module
-  // nodes contained by the outer module. Their paragraphs/data items are
-  // not yet scoped per-program (all attributed to the outer module).
-  for (const nested of extracted.nestedPrograms) {
-    const nestedModuleId = generateId('Module', `${filePath}:${nested.name}`);
+  // programs[] contains all PROGRAM-IDs with line ranges. The first entry
+  // is the primary (outer) program (already created above). Additional
+  // entries are nested programs that get their own Module nodes.
+  const programModuleIds = new Map<string, string>();
+  if (moduleId) {
+    programModuleIds.set(extracted.programName!.toUpperCase(), moduleId);
+  }
+  for (const prog of extracted.programs) {
+    if (prog.name.toUpperCase() === extracted.programName?.toUpperCase()) continue; // skip primary
+    const nestedModuleId = generateId('Module', `${filePath}:${prog.name}`);
     graph.addNode({
       id: nestedModuleId,
       label: 'Module',
       properties: {
-        name: nested.name,
+        name: prog.name,
         filePath,
-        startLine: nested.line,
-        endLine: nested.line,
+        startLine: prog.startLine,
+        endLine: prog.endLine,
         language: 'cobol' as any,
         isExported: true,
         description: 'nested-program',
       },
     });
-    const nestedParent = moduleId ?? fileNodeId;
+    // Find enclosing program by line-range containment
+    const enclosing = extracted.programs.find(p =>
+      p.startLine < prog.startLine && p.endLine > prog.endLine && p.nestingDepth < prog.nestingDepth,
+    );
+    const nestedParent = enclosing
+      ? (programModuleIds.get(enclosing.name.toUpperCase()) ?? moduleId ?? fileNodeId)
+      : (moduleId ?? fileNodeId);
     graph.addRelationship({
       id: generateId('CONTAINS', `${nestedParent}->${nestedModuleId}`),
       type: 'CONTAINS',
@@ -338,7 +349,8 @@ function mapToGraph(
       confidence: 1.0,
       reason: 'cobol-nested-program',
     });
-    moduleNodeIds.set(nested.name.toUpperCase(), nestedModuleId);
+    moduleNodeIds.set(prog.name.toUpperCase(), nestedModuleId);
+    programModuleIds.set(prog.name.toUpperCase(), nestedModuleId);
   }
 
   const parentId = moduleId ?? fileNodeId;
