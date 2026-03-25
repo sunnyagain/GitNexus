@@ -185,6 +185,8 @@ export const processCobol = (
   // processed, re-scan unresolved CALLS edges and patch them.
   // This covers both `cobol-call-unresolved` and CICS LINK/XCTL edges
   // whose targets contain `<unresolved>:`.
+  const unresolvedToRemove: string[] = [];
+
   graph.forEachRelationship(rel => {
     if (rel.type !== 'CALLS') return;
     const match = rel.targetId.match(/<unresolved>:(.+)/);
@@ -213,7 +215,15 @@ export const processCobol = (
         reason: rel.reason.replace('-unresolved', ''),
       });
     }
+
+    // Mark original unresolved edge for removal after iteration
+    unresolvedToRemove.push(rel.id);
   });
+
+  // Remove orphan unresolved edges (cannot delete during Map.forEach iteration)
+  for (const id of unresolvedToRemove) {
+    graph.removeRelationship(id);
+  }
 
   // ── 5. Process JCL files ───────────────────────────────────────────
   if (jclFiles.length > 0) {

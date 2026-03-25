@@ -198,7 +198,7 @@ const RE_END_EXEC = /\bEND-EXEC\b/i;
 const RE_PROC_USING = /\bPROCEDURE\s+DIVISION\s+USING\s+([\s\S]*?)(?:\.|$)/i;
 
 // ENTRY point
-const RE_ENTRY = /\bENTRY\s+"([^"]+)"(?:\s+USING\s+([\s\S]*?))?(?:\.|$)/i;
+const RE_ENTRY = /\bENTRY\s+(?:"([^"]+)"|'([^']+)')(?:\s+USING\s+([\s\S]*?))?(?:\.|$)/i;
 
 // MOVE statement
 const RE_MOVE = /\bMOVE\s+(CORRESPONDING\s+)?([A-Z][A-Z0-9-]+)\s+TO\s+([A-Z][A-Z0-9-]+)/i;
@@ -886,11 +886,15 @@ export function extractCobolSymbolsWithRegex(
     // ENTRY point
     const entryMatch = line.match(RE_ENTRY);
     if (entryMatch) {
-      result.entryPoints.push({
-        name: entryMatch[1],
-        parameters: entryMatch[2] ? entryMatch[2].trim().split(/\s+/).filter(s => s.length > 0) : [],
-        line: lineNum,
-      });
+      const entryName = entryMatch[1] ?? entryMatch[2];
+      const usingClause = entryMatch[3];
+      if (entryName) {
+        result.entryPoints.push({
+          name: entryName,
+          parameters: usingClause ? usingClause.trim().split(/\s+/).filter(s => s.length > 0) : [],
+          line: lineNum,
+        });
+      }
     }
 
     // MOVE statement (skip literals and figurative constants)

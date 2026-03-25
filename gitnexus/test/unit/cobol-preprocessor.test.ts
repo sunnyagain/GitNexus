@@ -553,6 +553,20 @@ describe('extractCobolSymbolsWithRegex', () => {
       expect(r.entryPoints[0].parameters).toEqual(['WS-PARAM1', 'WS-PARAM2']);
     });
 
+    it("extracts ENTRY 'ALTENTRY' with single-quoted target", () => {
+      const src = cobol(
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. TESTPROG.',
+        '      PROCEDURE DIVISION.',
+        '       MAIN-PARA.',
+        "           ENTRY 'ALTENTRY' USING WS-PARAM1.",
+      );
+      const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
+      expect(r.entryPoints).toHaveLength(1);
+      expect(r.entryPoints[0].name).toBe('ALTENTRY');
+      expect(r.entryPoints[0].parameters).toEqual(['WS-PARAM1']);
+    });
+
     it('extracts MOVE statements (skipping figurative constants)', () => {
       const src = cobol(
         '      IDENTIFICATION DIVISION.',

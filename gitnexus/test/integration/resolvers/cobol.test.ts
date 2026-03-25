@@ -236,30 +236,12 @@ describe('COBOL full system extraction', () => {
       ]);
     });
 
-    // -- CALLS edges: unresolved (retained from first pass) ---------------
+    // -- CALLS edges: unresolved orphan removal verified -------------------
 
-    it('produces exactly 2 CALLS edges with reason cobol-call-unresolved', () => {
+    it('produces zero unresolved CALLS edges after resolution', () => {
       const edges = getRelationships(result, 'CALLS')
-        .filter(e => e.rel.reason === 'cobol-call-unresolved');
-      expect(edges.length).toBe(2);
-      // CUSTUPDT -> AUDITLOG and RPTGEN -> CUSTUPDT were initially unresolved
-      // because the target module had not yet been processed at the time.
-      // The second pass adds resolved edges but does NOT remove these.
-      expect(edges.map(e => e.source).sort()).toEqual(['CUSTUPDT', 'RPTGEN']);
-    });
-
-    it('produces exactly 1 CALLS edge with reason cics-link-unresolved', () => {
-      const edges = getRelationships(result, 'CALLS')
-        .filter(e => e.rel.reason === 'cics-link-unresolved');
-      expect(edges.length).toBe(1);
-      expect(edges[0].source).toBe('RPTGEN');
-    });
-
-    it('produces exactly 1 CALLS edge with reason cics-xctl-unresolved', () => {
-      const edges = getRelationships(result, 'CALLS')
-        .filter(e => e.rel.reason === 'cics-xctl-unresolved');
-      expect(edges.length).toBe(1);
-      expect(edges[0].source).toBe('RPTGEN');
+        .filter(e => e.rel.reason.endsWith('-unresolved'));
+      expect(edges.length).toBe(0);
     });
 
     // -- CALLS edges: jcl-exec-pgm --------------------------------------
@@ -726,15 +708,13 @@ describe('COBOL full system extraction', () => {
 
   describe('grand totals', () => {
 
-    it('produces exactly 22 total CALLS edges (18 resolved + 4 unresolved)', () => {
+    it('produces exactly 18 total CALLS edges (orphan unresolved removed)', () => {
       // Resolved edges:
       //   9 cobol-perform + 2 cobol-perform-thru + 2 cobol-call +
       //   1 cics-link + 1 cics-xctl + 2 jcl-exec-pgm + 1 jcl-dd:CUSTFILE = 18
-      // Unresolved edges (retained from first pass before cross-program resolution):
-      //   2 cobol-call-unresolved + 1 cics-link-unresolved + 1 cics-xctl-unresolved = 4
-      // Grand total: 22
+      // Unresolved edges are removed by the second-pass resolution.
       const edges = getRelationships(result, 'CALLS');
-      expect(edges.length).toBe(22);
+      expect(edges.length).toBe(18);
     });
 
     it('produces exactly 48 total CONTAINS edges', () => {
