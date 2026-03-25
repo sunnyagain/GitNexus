@@ -94,7 +94,7 @@ export interface CobolRegexResults {
   }>;
   moves: Array<{
     from: string;
-    to: string;
+    targets: string[];
     line: number;
     caller: string | null;
     corresponding: boolean;
@@ -200,12 +200,39 @@ const RE_PROC_USING = /\bPROCEDURE\s+DIVISION\s+USING\s+([\s\S]*?)(?:\.|$)/i;
 // ENTRY point
 const RE_ENTRY = /\bENTRY\s+(?:"([^"]+)"|'([^']+)')(?:\s+USING\s+([\s\S]*?))?(?:\.|$)/i;
 
-// MOVE statement
-const RE_MOVE = /\bMOVE\s+(CORRESPONDING\s+)?([A-Z][A-Z0-9-]+)\s+TO\s+([A-Z][A-Z0-9-]+)/i;
+// MOVE statement — captures everything after TO for multi-target extraction
+const RE_MOVE = /\bMOVE\s+(CORRESPONDING\s+)?([A-Z][A-Z0-9-]+)\s+TO\s+(.+)/i;
 const MOVE_SKIP = new Set([
   'SPACES', 'ZEROS', 'ZEROES', 'LOW-VALUES', 'LOW-VALUE',
   'HIGH-VALUES', 'HIGH-VALUE', 'QUOTES', 'QUOTE', 'ALL',
 ]);
+
+/**
+ * Parse the text after "MOVE ... TO" into an array of target variable names.
+ * Handles: multiple targets, OF/IN qualifiers, subscripts, trailing periods.
+ * MOVE CORRESPONDING is always single-target per COBOL standard.
+ */
+function extractMoveTargets(afterTo: string): string[] {
+  // Strip trailing period and everything after it
+  const text = afterTo.replace(/\..*$/, '').trim();
+  if (!text) return [];
+
+  // Remove subscript/reference-modification parenthesized suffixes
+  const noSubscripts = text.replace(/\([^)]*\)/g, '');
+  const tokens = noSubscripts.split(/\s+/).filter(t => t.length > 0);
+
+  const targets: string[] = [];
+  const QUAL_KEYWORDS = new Set(['OF', 'IN']);
+  let skipNext = false;
+  for (const token of tokens) {
+    if (skipNext) { skipNext = false; continue; }
+    if (QUAL_KEYWORDS.has(token.toUpperCase())) { skipNext = true; continue; }
+    if (/^[A-Z][A-Z0-9-]+$/i.test(token) && !MOVE_SKIP.has(token.toUpperCase())) {
+      targets.push(token);
+    }
+  }
+  return targets;
+}
 
 // PERFORM: keywords that may follow PERFORM but are NOT paragraph/section names.
 // Inline PERFORM loops (UNTIL, VARYING) and inline test clauses (WITH TEST,
@@ -902,13 +929,21 @@ export function extractCobolSymbolsWithRegex(
     if (moveMatch) {
       const from = moveMatch[2].toUpperCase();
       if (!MOVE_SKIP.has(from)) {
-        result.moves.push({
-          from: moveMatch[2],
-          to: moveMatch[3],
-          line: lineNum,
-          caller: currentParagraph,
-          corresponding: !!moveMatch[1],
-        });
+        const isCorresponding = !!moveMatch[1];
+        // MOVE CORRESPONDING is always single-target per COBOL standard
+        const targets = isCorresponding
+          ? [moveMatch[3].replace(/\..*$/, '').trim().split(/\s+/)[0]].filter(t => /^[A-Z][A-Z0-9-]+$/i.test(t))
+          : extractMoveTargets(moveMatch[3]);
+
+        if (targets.length > 0) {
+          result.moves.push({
+            from: moveMatch[2],
+            targets,
+            line: lineNum,
+            caller: currentParagraph,
+            corresponding: isCorresponding,
+          });
+        }
       }
     }
   }

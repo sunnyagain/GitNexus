@@ -579,11 +579,65 @@ describe('extractCobolSymbolsWithRegex', () => {
         '           MOVE CORRESPONDING WS-REC1 TO WS-REC2.',
       );
       const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
-      const moveTargets = r.moves.map(m => ({ from: m.from, to: m.to, corr: m.corresponding }));
-      expect(moveTargets).toContainEqual({ from: 'WS-SOURCE', to: 'WS-TARGET', corr: false });
-      expect(moveTargets).toContainEqual({ from: 'WS-REC1', to: 'WS-REC2', corr: true });
+      const moveData = r.moves.map(m => ({ from: m.from, targets: m.targets, corr: m.corresponding }));
+      expect(moveData).toContainEqual({ from: 'WS-SOURCE', targets: ['WS-TARGET'], corr: false });
+      expect(moveData).toContainEqual({ from: 'WS-REC1', targets: ['WS-REC2'], corr: true });
       expect(r.moves.find(m => m.from === 'SPACES')).toBeUndefined();
       expect(r.moves.find(m => m.from === 'ZEROS')).toBeUndefined();
+    });
+
+    it('captures multiple MOVE targets: MOVE X TO A B C', () => {
+      const src = cobol(
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. TESTPROG.',
+        '      PROCEDURE DIVISION.',
+        '       MAIN-PARA.',
+        '           MOVE WS-SOURCE TO WS-A WS-B WS-C.',
+      );
+      const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
+      expect(r.moves).toHaveLength(1);
+      expect(r.moves[0].targets).toEqual(['WS-A', 'WS-B', 'WS-C']);
+    });
+
+    it('MOVE CORRESPONDING is always single target', () => {
+      const src = cobol(
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. TESTPROG.',
+        '      PROCEDURE DIVISION.',
+        '       MAIN-PARA.',
+        '           MOVE CORRESPONDING WS-REC1 TO WS-REC2.',
+      );
+      const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
+      expect(r.moves).toHaveLength(1);
+      expect(r.moves[0].targets).toEqual(['WS-REC2']);
+      expect(r.moves[0].corresponding).toBe(true);
+    });
+
+    it('MOVE handles OF-qualified names', () => {
+      const src = cobol(
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. TESTPROG.',
+        '      PROCEDURE DIVISION.',
+        '       MAIN-PARA.',
+        '           MOVE WS-SRC TO WS-NAME OF WS-RECORD WS-CODE.',
+      );
+      const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
+      expect(r.moves).toHaveLength(1);
+      // WS-NAME OF WS-RECORD -> WS-NAME is the target; WS-CODE is a second target
+      expect(r.moves[0].targets).toEqual(['WS-NAME', 'WS-CODE']);
+    });
+
+    it('MOVE skips figurative constants in targets', () => {
+      const src = cobol(
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. TESTPROG.',
+        '      PROCEDURE DIVISION.',
+        '       MAIN-PARA.',
+        '           MOVE WS-SRC TO SPACES.',
+      );
+      const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
+      // SPACES is in MOVE_SKIP, so no targets -> no move entry
+      expect(r.moves).toHaveLength(0);
     });
   });
 

@@ -579,11 +579,11 @@ function mapToGraph(
   const dataItemMap = buildDataItemMap(extracted.dataItems, filePath);
   for (const move of extracted.moves) {
     const fromPropId = dataItemMap.get(move.from.toUpperCase());
-    const toPropId = dataItemMap.get(move.to.toUpperCase());
     const callerId = move.caller
       ? (paraNodeIds.get(move.caller.toUpperCase()) ?? parentId)
       : parentId;
 
+    // One read edge per MOVE (regardless of number of targets)
     if (fromPropId) {
       graph.addRelationship({
         id: generateId('ACCESSES', `${callerId}->read->${move.from}:L${move.line}`),
@@ -594,15 +594,20 @@ function mapToGraph(
         reason: move.corresponding ? 'cobol-move-corresponding-read' : 'cobol-move-read',
       });
     }
-    if (toPropId) {
-      graph.addRelationship({
-        id: generateId('ACCESSES', `${callerId}->write->${move.to}:L${move.line}`),
-        type: 'ACCESSES',
-        sourceId: callerId,
-        targetId: toPropId,
-        confidence: 0.9,
-        reason: move.corresponding ? 'cobol-move-corresponding-write' : 'cobol-move-write',
-      });
+
+    // One write edge per target
+    for (const target of move.targets) {
+      const toPropId = dataItemMap.get(target.toUpperCase());
+      if (toPropId) {
+        graph.addRelationship({
+          id: generateId('ACCESSES', `${callerId}->write->${target}:L${move.line}`),
+          type: 'ACCESSES',
+          sourceId: callerId,
+          targetId: toPropId,
+          confidence: 0.9,
+          reason: move.corresponding ? 'cobol-move-corresponding-write' : 'cobol-move-write',
+        });
+      }
     }
   }
 
