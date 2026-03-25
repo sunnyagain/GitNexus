@@ -588,7 +588,14 @@ function mapToGraph(
         startLine: cics.line,
         endLine: cics.line,
         language: 'cobol' as any,
-        description: cics.mapName ? `map:${cics.mapName}` : cics.programName ? `program:${cics.programName}` : undefined,
+        description: [
+          cics.mapName && `map:${cics.mapName}`,
+          cics.programName && `program:${cics.programName}${cics.programIsLiteral === false ? ' (dynamic)' : ''}`,
+          cics.transId && `transid:${cics.transId}`,
+          cics.fileName && `file:${cics.fileName}`,
+          cics.queueName && `queue:${cics.queueName}`,
+          cics.labelName && `label:${cics.labelName}`,
+        ].filter(Boolean).join(' ') || undefined,
       },
     });
     graph.addRelationship({
@@ -599,20 +606,75 @@ function mapToGraph(
       confidence: 1.0,
       reason: 'cobol-exec-cics',
     });
-    // LINK/XCTL -> cross-program CALLS
+    // LINK/XCTL -> cross-program CALLS (handles both literal and variable PROGRAM)
     if (cics.programName && (cics.command === 'LINK' || cics.command === 'XCTL')) {
-      const cicsTargetModuleId = moduleNodeIds.get(cics.programName.toUpperCase());
-      const targetId = cicsTargetModuleId
-        ?? generateId('Module', `<unresolved>:${cics.programName.toUpperCase()}`);
-      const cicsReason = `cics-${cics.command.toLowerCase()}`;
+      if (cics.programIsLiteral === false) {
+        // Dynamic PROGRAM reference via variable — annotate, don't resolve
+        graph.addNode({
+          id: generateId('CodeElement', `${filePath}:cics-dynamic-pgm:${cics.programName}:L${cics.line}`),
+          label: 'CodeElement',
+          properties: {
+            name: `CICS ${cics.command} ${cics.programName}`,
+            filePath, startLine: cics.line, endLine: cics.line,
+            language: 'cobol' as any,
+            description: `cics-dynamic-program (target is data item ${cics.programName})`,
+          },
+        });
+        graph.addRelationship({
+          id: generateId('CONTAINS', `${parentId}->cics-dynamic-pgm:${cics.programName}:L${cics.line}`),
+          type: 'CONTAINS', sourceId: parentId,
+          targetId: generateId('CodeElement', `${filePath}:cics-dynamic-pgm:${cics.programName}:L${cics.line}`),
+          confidence: 1.0, reason: 'cics-dynamic-program',
+        });
+      } else {
+        const cicsTargetModuleId = moduleNodeIds.get(cics.programName.toUpperCase());
+        const targetId = cicsTargetModuleId
+          ?? generateId('Module', `<unresolved>:${cics.programName.toUpperCase()}`);
+        const cicsReason = `cics-${cics.command.toLowerCase()}`;
+        graph.addRelationship({
+          id: generateId('CALLS', `${parentId}->cics-${cics.command.toLowerCase()}->${cics.programName}:L${cics.line}`),
+          type: 'CALLS', sourceId: parentId, targetId,
+          confidence: cicsTargetModuleId ? 0.95 : 0.5,
+          reason: cicsTargetModuleId ? cicsReason : `${cicsReason}-unresolved`,
+        });
+      }
+    }
+
+    // CICS FILE I/O -> ACCESSES edges (READ/WRITE/REWRITE/DELETE/STARTBR FILE)
+    if (cics.fileName) {
+      const fileRecordId = generateId('Record', `${filePath}:${cics.fileName}`);
+      const ioCommand = cics.command.toUpperCase();
+      const isRead = ['READ', 'STARTBR', 'READNEXT', 'READPREV', 'READ NEXT', 'READ PREV'].includes(ioCommand);
+      const isWrite = ['WRITE', 'REWRITE', 'DELETE'].includes(ioCommand);
+      const reason = isRead ? 'cics-file-read' : isWrite ? 'cics-file-write' : 'cics-file-access';
       graph.addRelationship({
-        id: generateId('CALLS', `${parentId}->cics-${cics.command.toLowerCase()}->${cics.programName}:L${cics.line}`),
-        type: 'CALLS',
-        sourceId: parentId,
-        targetId,
-        confidence: cicsTargetModuleId ? 0.95 : 0.5,
-        reason: cicsTargetModuleId ? cicsReason : `${cicsReason}-unresolved`,
+        id: generateId('ACCESSES', `${cicsId}->file->${cics.fileName}:L${cics.line}`),
+        type: 'ACCESSES', sourceId: cicsId, targetId: fileRecordId,
+        confidence: 0.9, reason,
       });
+    }
+
+    // CICS QUEUE -> ACCESSES edge (WRITEQ/READQ TS/TD)
+    if (cics.queueName) {
+      const queueId = generateId('Record', `<queue>:${cics.queueName}`);
+      graph.addRelationship({
+        id: generateId('ACCESSES', `${cicsId}->queue->${cics.queueName}:L${cics.line}`),
+        type: 'ACCESSES', sourceId: cicsId, targetId: queueId,
+        confidence: 0.85, reason: 'cics-queue',
+      });
+    }
+
+    // CICS HANDLE ABEND LABEL -> CALLS edge to error handler paragraph
+    if (cics.labelName) {
+      const labelTargetId = paraNodeIds.get(cics.labelName.toUpperCase())
+        ?? sectionNodeIds.get(cics.labelName.toUpperCase());
+      if (labelTargetId) {
+        graph.addRelationship({
+          id: generateId('CALLS', `${parentId}->abend-label->${cics.labelName}:L${cics.line}`),
+          type: 'CALLS', sourceId: parentId, targetId: labelTargetId,
+          confidence: 0.9, reason: 'cics-handle-abend',
+        });
+      }
     }
   }
 

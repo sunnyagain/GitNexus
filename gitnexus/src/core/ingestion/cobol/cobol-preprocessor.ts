@@ -84,7 +84,12 @@ export interface CobolRegexResults {
     command: string;
     mapName?: string;
     programName?: string;
+    programIsLiteral?: boolean;
     transId?: string;
+    fileName?: string;
+    fileIsLiteral?: boolean;
+    queueName?: string;
+    labelName?: string;
   }>;
 
   // Phase 3: Linkage + Data Flow
@@ -538,13 +543,32 @@ function parseExecCicsBlock(block: string, line: number): CobolRegexResults['exe
   const mapMatch = body.match(/\bMAP\s*\(\s*(?:['"]([^'"]+)['"]|([A-Z][A-Z0-9-]+))\s*\)/i);
   if (mapMatch) result.mapName = mapMatch[1] ?? mapMatch[2];
 
-  // PROGRAM name: PROGRAM('name') or PROGRAM("name")
-  const progMatch = body.match(/\bPROGRAM\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
-  if (progMatch) result.programName = progMatch[1];
+  // PROGRAM name: PROGRAM('name') or PROGRAM("name") or PROGRAM(VARIABLE)
+  const progMatch = body.match(/\bPROGRAM\s*\(\s*(?:['"]([^'"]+)['"]|([A-Z][A-Z0-9-]+))\s*\)/i);
+  if (progMatch) {
+    result.programName = progMatch[1] ?? progMatch[2];
+    result.programIsLiteral = !!progMatch[1];
+  }
 
-  // TRANSID: TRANSID('name') or TRANSID("name")
-  const transMatch = body.match(/\bTRANSID\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
-  if (transMatch) result.transId = transMatch[1];
+  // TRANSID: TRANSID('name') or TRANSID("name") or TRANSID(VARIABLE)
+  const transMatch = body.match(/\bTRANSID\s*\(\s*(?:['"]([^'"]+)['"]|([A-Z][A-Z0-9-]+))\s*\)/i);
+  if (transMatch) result.transId = transMatch[1] ?? transMatch[2];
+
+  // FILE/DATASET: FILE('name') or DATASET('name') or FILE(VARIABLE)
+  // Used in CICS READ, WRITE, REWRITE, DELETE, STARTBR, READNEXT, READPREV, ENDBR
+  const fileMatch = body.match(/\b(?:FILE|DATASET)\s*\(\s*(?:['"]([^'"]+)['"]|([A-Z][A-Z0-9-]+))\s*\)/i);
+  if (fileMatch) {
+    result.fileName = fileMatch[1] ?? fileMatch[2];
+    result.fileIsLiteral = !!fileMatch[1];
+  }
+
+  // QUEUE: QUEUE('name') — used in WRITEQ/READQ TS/TD
+  const queueMatch = body.match(/\bQUEUE\s*\(\s*(?:['"]([^'"]+)['"]|([A-Z][A-Z0-9-]+))\s*\)/i);
+  if (queueMatch) result.queueName = queueMatch[1] ?? queueMatch[2];
+
+  // HANDLE ABEND LABEL(paragraph-name) — error handler target
+  const labelMatch = body.match(/\bLABEL\s*\(\s*([A-Z][A-Z0-9-]+)\s*\)/i);
+  if (labelMatch) result.labelName = labelMatch[1];
 
   return result;
 }
