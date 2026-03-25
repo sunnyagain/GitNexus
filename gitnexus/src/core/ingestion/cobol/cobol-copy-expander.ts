@@ -31,6 +31,7 @@ export interface CopyResolution {
   resolvedPath: string | null;
   line: number;
   replacing: CopyReplacing[];
+  library?: string;
 }
 
 export interface CopyExpansionResult {
@@ -122,6 +123,7 @@ interface ParsedCopyStatement {
   endLine: number;
   target: string;
   replacing: CopyReplacing[];
+  library?: string;
 }
 
 /**
@@ -131,54 +133,67 @@ interface ParsedCopyStatement {
  *   LEADING "ESP-" BY "LK-ESP-" LEADING "KPSESPL" BY "LK-KPSESPL"
  *   "ANAZI-KEY" BY "LK-KEY"
  *   TRAILING "-IN" BY "-OUT"
+ *   ==CUST-== BY ==WS-CUST-==
+ *   ==OLD-TEXT== BY ====
  */
-function parseReplacingClause(text: string): CopyReplacing[] {
+export function parseReplacingClause(text: string): CopyReplacing[] {
   const replacings: CopyReplacing[] = [];
   if (!text || text.trim().length === 0) return replacings;
 
-  // Tokenize: split on whitespace, preserving quoted strings
-  const tokens: string[] = [];
-  const tokenRe = /"([^"]*)"|(\S+)/g;
+  // Tokenize: ==pseudotext==, "quoted strings", or bare words.
+  // Pseudotext can contain spaces and single = chars but not ==.
+  interface TokenInfo { value: string; isPseudotext: boolean; }
+  const tokens: TokenInfo[] = [];
+  const tokenRe = /==((?:[^=]|=[^=])*)==|"([^"]*)"|(\S+)/g;
   let tm: RegExpExecArray | null;
   while ((tm = tokenRe.exec(text)) !== null) {
-    // Store the matched content; for quoted strings, keep the inner value
-    // but mark them so we can distinguish. We'll store all as plain strings
-    // and track which were quoted separately.
-    tokens.push(tm[1] !== undefined ? tm[1] : tm[2]);
+    if (tm[1] !== undefined) {
+      // Pseudotext: trim leading/trailing whitespace
+      tokens.push({ value: tm[1].trim(), isPseudotext: true });
+    } else if (tm[2] !== undefined) {
+      tokens.push({ value: tm[2], isPseudotext: false });
+    } else {
+      tokens.push({ value: tm[3], isPseudotext: false });
+    }
   }
 
   // Parse token stream: [LEADING|TRAILING]? <from> BY <to>
   let i = 0;
   while (i < tokens.length) {
     let type: CopyReplacing['type'] = 'EXACT';
-    const upper = tokens[i].toUpperCase();
 
-    // Check for type modifier
-    if (upper === 'LEADING') {
-      type = 'LEADING';
-      i++;
-    } else if (upper === 'TRAILING') {
-      type = 'TRAILING';
-      i++;
+    // Check for type modifier (only on non-pseudotext tokens)
+    if (!tokens[i].isPseudotext) {
+      const upper = tokens[i].value.toUpperCase();
+      if (upper === 'LEADING') {
+        type = 'LEADING';
+        i++;
+      } else if (upper === 'TRAILING') {
+        type = 'TRAILING';
+        i++;
+      }
     }
 
     if (i >= tokens.length) break;
-    const from = tokens[i];
+    const fromToken = tokens[i];
     i++;
+
+    // Pseudotext always forces EXACT type
+    if (fromToken.isPseudotext) type = 'EXACT';
 
     // Expect BY keyword
     if (i >= tokens.length) break;
-    if (tokens[i].toUpperCase() !== 'BY') {
+    if (tokens[i].value.toUpperCase() !== 'BY') {
       // Malformed — skip this token and try to resync
       continue;
     }
     i++; // skip BY
 
     if (i >= tokens.length) break;
-    const to = tokens[i];
+    const toToken = tokens[i];
     i++;
 
-    replacings.push({ type, from, to });
+    replacings.push({ type, from: fromToken.value, to: toToken.value });
   }
 
   return replacings;
@@ -256,10 +271,14 @@ function parseSingleCopyStatement(
   const text = stmt.replace(/\.\s*$/, '').trim();
 
   // Extract target: COPY <target> or COPY "<target>" or COPY '<target>'
-  const targetMatch = text.match(/^COPY\s+(?:"([^"]+)"|'([^']+)'|([A-Z][A-Z0-9-]*))/i);
+  // Optionally followed by IN/OF <library-name> (COBOL-85 standard: IN and OF are synonyms)
+  const targetMatch = text.match(
+    /^COPY\s+(?:"([^"]+)"|'([^']+)'|([A-Z][A-Z0-9-]*))(?:\s+(?:IN|OF)\s+([A-Z][A-Z0-9-]*))?/i,
+  );
   if (!targetMatch) return null;
 
   const target = targetMatch[1] ?? targetMatch[2] ?? targetMatch[3];
+  const library = targetMatch[4] || undefined;
 
   // Extract REPLACING clause if present
   let replacing: CopyReplacing[] = [];
@@ -269,7 +288,7 @@ function parseSingleCopyStatement(
     replacing = parseReplacingClause(replacingText);
   }
 
-  return { startLine, endLine, target, replacing };
+  return { startLine, endLine, target, replacing, library };
 }
 
 // ---------------------------------------------------------------------------
@@ -286,8 +305,25 @@ function parseSingleCopyStatement(
 function applyReplacing(content: string, replacings: CopyReplacing[]): string {
   if (replacings.length === 0) return content;
 
-  return content.replace(RE_COBOL_IDENTIFIER, (match) => {
-    for (const r of replacings) {
+  // First pass: handle EXACT replacements that contain spaces or non-identifier
+  // characters (pseudotext). These cannot be handled by identifier-level matching.
+  let result = content;
+  for (const r of replacings) {
+    if (r.type === 'EXACT' && (r.from.includes(' ') || !/^[A-Z][A-Z0-9-]*$/i.test(r.from))) {
+      const escaped = r.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(escaped, 'gi');
+      result = result.replace(re, r.to);
+    }
+  }
+
+  // Second pass: identifier-level replacements (LEADING, TRAILING, single-word EXACT)
+  const identifierReplacings = replacings.filter(
+    r => !(r.type === 'EXACT' && (r.from.includes(' ') || !/^[A-Z][A-Z0-9-]*$/i.test(r.from))),
+  );
+  if (identifierReplacings.length === 0) return result;
+
+  return result.replace(RE_COBOL_IDENTIFIER, (match) => {
+    for (const r of identifierReplacings) {
       const upper = match.toUpperCase();
       const from = r.from.toUpperCase();
       const to = r.to.toUpperCase();
@@ -388,6 +424,7 @@ export function expandCopies(
         resolvedPath,
         line: cs.startLine,
         replacing: cs.replacing,
+        library: cs.library,
       });
 
       // Cannot resolve — keep original lines

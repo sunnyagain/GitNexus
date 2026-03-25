@@ -221,6 +221,45 @@ describe('extractCobolSymbolsWithRegex', () => {
       expect(r.performs[0].thruTarget).toBe('STEP-Z');
     });
 
+    it('does NOT store PERFORM WS-COUNT TIMES as a perform target', () => {
+      const src = cobol(
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. TESTPROG.',
+        '      PROCEDURE DIVISION.',
+        '       MAIN-PARA.',
+        '           PERFORM WS-COUNT TIMES.',
+      );
+      const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
+      expect(r.performs.map(p => p.target)).not.toContain('WS-COUNT');
+    });
+
+    it('extracts dynamic CALL (unquoted) with isQuoted=false', () => {
+      const src = cobol(
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. TESTPROG.',
+        '      PROCEDURE DIVISION.',
+        '       MAIN-PARA.',
+        '           CALL WS-PROG-NAME.',
+      );
+      const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
+      expect(r.calls).toHaveLength(1);
+      expect(r.calls[0].target).toBe('WS-PROG-NAME');
+      expect(r.calls[0].isQuoted).toBe(false);
+    });
+
+    it('quoted CALL has isQuoted=true', () => {
+      const src = cobol(
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. TESTPROG.',
+        '      PROCEDURE DIVISION.',
+        '       MAIN-PARA.',
+        '           CALL "SUBPROG".',
+      );
+      const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
+      expect(r.calls).toHaveLength(1);
+      expect(r.calls[0].isQuoted).toBe(true);
+    });
+
     it('extracts COPY copybook (unquoted)', () => {
       const src = cobol(
         '      IDENTIFICATION DIVISION.',
@@ -482,6 +521,20 @@ describe('extractCobolSymbolsWithRegex', () => {
       expect(cics.mapName).toBe('EMPMAP');
       expect(cics.programName).toBe('EMPPROG');
       expect(cics.transId).toBe('EMPT');
+    });
+
+    it('extracts EXEC CICS MAP with unquoted identifier', () => {
+      const src = cobol(
+        '      IDENTIFICATION DIVISION.',
+        '       PROGRAM-ID. TESTPROG.',
+        '      PROCEDURE DIVISION.',
+        '       MAIN-PARA.',
+        '           EXEC CICS SEND MAP(WS-MAP-NAME)',
+        '           END-EXEC.',
+      );
+      const r = extractCobolSymbolsWithRegex(src, 'test.cbl');
+      expect(r.execCicsBlocks).toHaveLength(1);
+      expect(r.execCicsBlocks[0].mapName).toBe('WS-MAP-NAME');
     });
 
     it('handles single-line EXEC SQL ... END-EXEC', () => {

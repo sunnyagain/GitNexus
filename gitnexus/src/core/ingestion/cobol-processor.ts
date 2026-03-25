@@ -441,6 +441,32 @@ function mapToGraph(
 
   // ── CALL -> CALLS relationship (cross-program) ──────────────────
   for (const call of extracted.calls) {
+    if (!call.isQuoted) {
+      // Dynamic CALL via data item — not statically resolvable.
+      // Emit a CodeElement annotation for visibility in impact analysis.
+      graph.addNode({
+        id: generateId('CodeElement', `${filePath}:dynamic-call:${call.target}:L${call.line}`),
+        label: 'CodeElement',
+        properties: {
+          name: `CALL ${call.target}`,
+          filePath,
+          startLine: call.line,
+          endLine: call.line,
+          language: 'cobol' as any,
+          description: 'dynamic-call (target is a data item, not resolvable statically)',
+        },
+      });
+      graph.addRelationship({
+        id: generateId('CONTAINS', `${parentId}->dynamic-call:${call.target}:L${call.line}`),
+        type: 'CONTAINS',
+        sourceId: parentId,
+        targetId: generateId('CodeElement', `${filePath}:dynamic-call:${call.target}:L${call.line}`),
+        confidence: 1.0,
+        reason: 'cobol-dynamic-call',
+      });
+      continue;
+    }
+
     const targetModuleId = moduleNodeIds.get(call.target.toUpperCase());
     // Create edge even if target not yet known — use a synthetic target id
     const targetId = targetModuleId

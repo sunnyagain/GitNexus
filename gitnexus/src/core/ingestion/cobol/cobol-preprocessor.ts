@@ -37,7 +37,7 @@ export interface CobolRegexResults {
   paragraphs: Array<{ name: string; line: number }>;
   sections: Array<{ name: string; line: number }>;
   performs: Array<{ caller: string | null; target: string; thruTarget?: string; line: number }>;
-  calls: Array<{ target: string; line: number }>;
+  calls: Array<{ target: string; line: number; isQuoted: boolean }>;
   copies: Array<{ target: string; line: number }>;
   dataItems: Array<{
     name: string;
@@ -186,6 +186,8 @@ const RE_PERFORM = /\bPERFORM\s+([A-Z][A-Z0-9-]+)(?:\s+THRU\s+([A-Z][A-Z0-9-]+))
 // Both double-quoted ("PROG") and single-quoted ('PROG') targets are valid COBOL.
 // Use separate alternation groups so quotes must match (prevents "PROG' false-matches).
 const RE_CALL = /\bCALL\s+(?:"([^"]+)"|'([^']+)')/i;
+// Dynamic CALL via data item (no quotes): CALL WS-PROGRAM-NAME
+const RE_CALL_DYNAMIC = /\bCALL\s+([A-Z][A-Z0-9-]+)(?:\s|\.)/i;
 const RE_COPY_UNQUOTED = /\bCOPY\s+([A-Z][A-Z0-9-]+)(?:\s|\.)/i;
 const RE_COPY_QUOTED = /\bCOPY\s+(?:"([^"]+)"|'([^']+)')(?:\s|\.)/i;
 
@@ -482,9 +484,9 @@ function parseExecCicsBlock(block: string, line: number): CobolRegexResults['exe
 
   const result: CobolRegexResults['execCicsBlocks'][number] = { line, command };
 
-  // MAP name: MAP('name') or MAP("name")
-  const mapMatch = body.match(/\bMAP\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
-  if (mapMatch) result.mapName = mapMatch[1];
+  // MAP name: MAP('name') or MAP("name") or MAP(IDENTIFIER)
+  const mapMatch = body.match(/\bMAP\s*\(\s*(?:['"]([^'"]+)['"]|([A-Z][A-Z0-9-]+))\s*\)/i);
+  if (mapMatch) result.mapName = mapMatch[1] ?? mapMatch[2];
 
   // PROGRAM name: PROGRAM('name') or PROGRAM("name")
   const progMatch = body.match(/\bPROGRAM\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
@@ -705,7 +707,13 @@ export function extractCobolSymbolsWithRegex(
     // --- CALL (all divisions, typically procedure) ---
     const callMatch = line.match(RE_CALL);
     if (callMatch) {
-      result.calls.push({ target: callMatch[1] ?? callMatch[2], line: lineNum });
+      result.calls.push({ target: callMatch[1] ?? callMatch[2], line: lineNum, isQuoted: true });
+    } else {
+      // Dynamic CALL via data item (no quotes) — not statically resolvable
+      const dynCallMatch = line.match(RE_CALL_DYNAMIC);
+      if (dynCallMatch) {
+        result.calls.push({ target: dynCallMatch[1], line: lineNum, isQuoted: false });
+      }
     }
 
     // --- Division-specific extraction ---
@@ -901,12 +909,17 @@ export function extractCobolSymbolsWithRegex(
       const target = perfMatch[1];
       // Skip COBOL inline-perform keywords that are not paragraph names
       if (!PERFORM_KEYWORD_SKIP.has(target.toUpperCase())) {
-        result.performs.push({
-          caller: currentParagraph,
-          target,
-          thruTarget: perfMatch[2] || undefined,
-          line: lineNum,
-        });
+        // Also check for "PERFORM identifier TIMES" — the identifier is a
+        // data item count, not a paragraph name (fundamental regex ambiguity).
+        const afterTarget = line.substring(line.indexOf(target) + target.length).trim();
+        if (!/^TIMES\b/i.test(afterTarget)) {
+          result.performs.push({
+            caller: currentParagraph,
+            target,
+            thruTarget: perfMatch[2] || undefined,
+            line: lineNum,
+          });
+        }
       }
     }
 
