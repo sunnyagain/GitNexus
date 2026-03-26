@@ -141,7 +141,7 @@ export const Header = ({ onFocusNode, availableRepos = [], onSwitchRepo }: Heade
 
             {/* Repo dropdown */}
             {isRepoDropdownOpen && availableRepos.length >= 2 && (
-              <div className="absolute top-full left-0 mt-1 w-72 bg-surface border border-border-subtle rounded-lg shadow-xl overflow-hidden z-50">
+              <div className="absolute top-full left-0 mt-1 w-72 max-h-80 bg-surface border border-border-subtle rounded-lg shadow-xl overflow-y-auto z-50">
                 {availableRepos.map((repo) => {
                   const isCurrent = repo.name === projectName;
                   return (
