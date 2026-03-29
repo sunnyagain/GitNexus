@@ -1,9 +1,16 @@
 # syntax=docker/dockerfile:1
 
+# --- Build Shared Package ---
+FROM node:20-bookworm AS shared-builder
+WORKDIR /gitnexus-shared
+COPY gitnexus-shared/ .
+RUN npm ci && npm run build
+
 # --- Build CLI ---
 FROM node:20-bookworm AS cli-builder
 WORKDIR /app
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+COPY --from=shared-builder /gitnexus-shared /gitnexus-shared
 COPY gitnexus/ .
 RUN npm ci --ignore-scripts \
     && (npm rebuild 2>&1 || true) \
@@ -13,6 +20,7 @@ RUN npm ci --ignore-scripts \
 # --- Build Web ---
 FROM node:20-bookworm AS web-builder
 WORKDIR /app
+COPY --from=shared-builder /gitnexus-shared /gitnexus-shared
 COPY gitnexus-web/ .
 RUN npm ci && npm run build
 
