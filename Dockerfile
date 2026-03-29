@@ -22,6 +22,7 @@ FROM node:20-bookworm AS web-builder
 WORKDIR /app
 COPY --from=shared-builder /gitnexus-shared /gitnexus-shared
 COPY gitnexus-web/ .
+COPY gitnexus/package.json /gitnexus/package.json
 RUN npm ci && npm run build
 
 # --- Runtime (Trixie for glibc 2.41, needed by @ladybugdb/core) ---
