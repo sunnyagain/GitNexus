@@ -16,6 +16,7 @@ import {
   embeddingToArray,
   isEmbedderReady,
 } from './embedder.js';
+import { isHttpMode } from './http-client.js';
 import { generateBatchEmbeddingTexts } from './text-generator.js';
 import {
   type EmbeddingProgress,
@@ -161,6 +162,12 @@ export const runEmbeddingPipeline = async (
   skipNodeIds?: Set<string>,
 ): Promise<void> => {
   const finalConfig = { ...DEFAULT_EMBEDDING_CONFIG, ...config };
+
+  // In HTTP mode the remote server handles the compute — use larger batches
+  // to match HTTP_BATCH_SIZE (64) and reduce round-trip overhead.
+  if (isHttpMode() && !config.batchSize) {
+    finalConfig.batchSize = 64;
+  }
 
   try {
     // Phase 1: Load embedding model
