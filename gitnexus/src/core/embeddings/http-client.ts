@@ -5,11 +5,11 @@
  * Imported by both the core embedder (batch) and MCP embedder (query).
  */
 
-const HTTP_TIMEOUT_MS = 30_000;
+const HTTP_TIMEOUT_MS = 60_000;
 const HTTP_MAX_RETRIES = 2;
 const HTTP_RETRY_BACKOFF_MS = 1_000;
 const HTTP_BATCH_SIZE = 64;
-const HTTP_CONCURRENCY = 3;
+const HTTP_CONCURRENCY = 2;
 const DEFAULT_DIMS = 384;
 
 interface HttpConfig {
