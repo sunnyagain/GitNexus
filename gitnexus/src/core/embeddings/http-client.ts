@@ -9,6 +9,7 @@ const HTTP_TIMEOUT_MS = 30_000;
 const HTTP_MAX_RETRIES = 2;
 const HTTP_RETRY_BACKOFF_MS = 1_000;
 const HTTP_BATCH_SIZE = 64;
+const HTTP_CONCURRENCY = 3;
 const DEFAULT_DIMS = 384;
 
 interface HttpConfig {
@@ -152,22 +153,36 @@ export const httpEmbed = async (texts: string[]): Promise<Float32Array[]> => {
   const url = `${config.baseUrl}/embeddings`;
   const allVectors: Float32Array[] = [];
 
+  const batches: Array<{ texts: string[]; index: number }> = [];
   for (let i = 0; i < texts.length; i += HTTP_BATCH_SIZE) {
-    const batch = texts.slice(i, i + HTTP_BATCH_SIZE);
-    const batchIndex = Math.floor(i / HTTP_BATCH_SIZE);
-    const items = await httpEmbedBatch(url, batch, config.model, config.apiKey, batchIndex);
+    batches.push({
+      texts: texts.slice(i, i + HTTP_BATCH_SIZE),
+      index: Math.floor(i / HTTP_BATCH_SIZE),
+    });
+  }
 
-    if (items.length !== batch.length) {
+  const results: EmbeddingItem[][] = new Array(batches.length);
+  for (let i = 0; i < batches.length; i += HTTP_CONCURRENCY) {
+    const chunk = batches.slice(i, i + HTTP_CONCURRENCY);
+    const chunkResults = await Promise.all(
+      chunk.map((b) => httpEmbedBatch(url, b.texts, config.model, config.apiKey, b.index)),
+    );
+    for (let j = 0; j < chunkResults.length; j++) {
+      results[i + j] = chunkResults[j];
+    }
+  }
+
+  for (let i = 0; i < batches.length; i++) {
+    const items = results[i];
+    const batch = batches[i];
+    if (items.length !== batch.texts.length) {
       throw new Error(
-        `Embedding endpoint returned ${items.length} vectors for ${batch.length} texts ` +
-          `(${safeUrl(url)}, batch ${batchIndex})`,
+        `Embedding endpoint returned ${items.length} vectors for ${batch.texts.length} texts ` +
+          `(${safeUrl(url)}, batch ${batch.index})`,
       );
     }
-
     for (const item of items) {
       const vec = new Float32Array(item.embedding);
-      // Fail fast on dimension mismatch rather than inserting bad vectors
-      // into the FLOAT[N] column which would cause a cryptic Kuzu error.
       const expected = config.dimensions ?? DEFAULT_DIMS;
       if (vec.length !== expected) {
         const hint = config.dimensions
@@ -178,7 +193,6 @@ export const httpEmbed = async (texts: string[]): Promise<Float32Array[]> => {
             `but expected ${expected}d. ${hint}`,
         );
       }
-
       allVectors.push(vec);
     }
   }
