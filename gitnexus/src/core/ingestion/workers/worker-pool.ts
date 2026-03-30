@@ -32,7 +32,7 @@ type WorkerOutgoingMessage =
  * Max files to send to a worker in a single postMessage.
  * Keeps structured-clone memory bounded per sub-batch.
  */
-const SUB_BATCH_SIZE = 100;
+const SUB_BATCH_SIZE = 10;
 
 /** Per sub-batch timeout. If a single sub-batch takes longer than this,
  *  likely a pathological file (e.g. minified 50MB JS). Fail fast. 30s. */
