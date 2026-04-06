@@ -48,6 +48,6 @@ jobs:
 
       - name: Trigger Docker build
         if: steps.check.outputs.behind != '0'
-        run: gh workflow run docker-publish.yml
+        run: gh workflow run docker-publish.yml --repo $GITHUB_REPOSITORY
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
