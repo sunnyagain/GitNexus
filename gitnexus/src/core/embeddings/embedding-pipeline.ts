@@ -105,7 +105,7 @@ const batchInsertEmbeddings = async (
 ): Promise<void> => {
   const valid = updates.filter((u) => u.embedding.length === expectedDims);
   if (valid.length === 0) return;
-  const cypher = `CREATE (e:CodeEmbedding {nodeId: $nodeId, embedding: $embedding})`;
+  const cypher = `MERGE (e:CodeEmbedding {nodeId: $nodeId}) SET e.embedding = $embedding`;
   const paramsList = valid.map((u) => ({ nodeId: u.id, embedding: u.embedding }));
   await executeWithReusedStatement(cypher, paramsList);
 };
