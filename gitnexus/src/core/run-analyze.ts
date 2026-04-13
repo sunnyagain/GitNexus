@@ -205,16 +205,22 @@ export async function runFullAnalysis(
 
     // ── Phase 3.5: Re-insert cached embeddings ────────────────────────
     if (cachedEmbeddings.length > 0) {
-      const cachedDims = cachedEmbeddings[0].embedding.length;
       const { EMBEDDING_DIMS } = await import('./lbug/schema.js');
-      if (cachedDims !== EMBEDDING_DIMS) {
-        // Dimensions changed (e.g. switched embedding model) — discard cache and re-embed all
+      const validEmbeddings = cachedEmbeddings.filter((e) => e.embedding.length === EMBEDDING_DIMS);
+      const discarded = cachedEmbeddings.length - validEmbeddings.length;
+      if (discarded > 0) {
         log(
-          `Embedding dimensions changed (${cachedDims}d -> ${EMBEDDING_DIMS}d), discarding cache`,
+          `Discarded ${discarded} cached embeddings with wrong dimensions (expected ${EMBEDDING_DIMS}d)`,
         );
-        cachedEmbeddings = [];
-        cachedEmbeddingNodeIds = new Set();
-      } else {
+        for (const e of cachedEmbeddings) {
+          if (e.embedding.length !== EMBEDDING_DIMS) {
+            cachedEmbeddingNodeIds.delete(e.nodeId);
+          }
+        }
+      }
+      cachedEmbeddings = validEmbeddings;
+
+      if (cachedEmbeddings.length > 0) {
         progress('embeddings', 88, `Restoring ${cachedEmbeddings.length} cached embeddings...`);
         const EMBED_BATCH = 200;
         for (let i = 0; i < cachedEmbeddings.length; i += EMBED_BATCH) {

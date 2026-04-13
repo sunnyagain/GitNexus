@@ -27,6 +27,7 @@ import {
   DEFAULT_EMBEDDING_CONFIG,
   EMBEDDABLE_LABELS,
 } from './types.js';
+import { EMBEDDING_DIMS } from '../lbug/schema.js';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -100,10 +101,12 @@ const batchInsertEmbeddings = async (
     paramsList: Array<Record<string, any>>,
   ) => Promise<void>,
   updates: Array<{ id: string; embedding: number[] }>,
+  expectedDims: number,
 ): Promise<void> => {
-  // INSERT into separate embedding table - much more memory efficient!
+  const valid = updates.filter((u) => u.embedding.length === expectedDims);
+  if (valid.length === 0) return;
   const cypher = `CREATE (e:CodeEmbedding {nodeId: $nodeId, embedding: $embedding})`;
-  const paramsList = updates.map((u) => ({ nodeId: u.id, embedding: u.embedding }));
+  const paramsList = valid.map((u) => ({ nodeId: u.id, embedding: u.embedding }));
   await executeWithReusedStatement(cypher, paramsList);
 };
 
@@ -259,7 +262,7 @@ export const runEmbeddingPipeline = async (
         embedding: embeddingToArray(embeddings[i]),
       }));
 
-      await batchInsertEmbeddings(executeWithReusedStatement, updates);
+      await batchInsertEmbeddings(executeWithReusedStatement, updates, EMBEDDING_DIMS);
 
       processedNodes += batch.length;
 
