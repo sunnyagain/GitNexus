@@ -8,7 +8,6 @@
  * The dbPath is shared with test files via vitest's provide/inject API.
  */
 import path from 'path';
-import lbug from '@ladybugdb/core';
 import type { GlobalSetupContext } from 'vitest/node';
 import { createTempDir } from './helpers/test-db.js';
 import {
@@ -21,28 +20,38 @@ export default async function setup({ provide }: GlobalSetupContext) {
   const tmpHandle = await createTempDir('gitnexus-shared-');
   const dbPath = path.join(tmpHandle.dbPath, 'lbug');
 
-  // Create DB with full schema
-  const db = new lbug.Database(dbPath);
-  const conn = new lbug.Connection(db);
-
-  for (const q of NODE_SCHEMA_QUERIES) {
-    await conn.query(q);
-  }
-  for (const q of REL_SCHEMA_QUERIES) {
-    await conn.query(q);
-  }
-  await conn.query(EMBEDDING_SCHEMA);
-
-  // Pre-install FTS extension so forks don't need to download it
   try {
-    await conn.query('INSTALL fts');
-    await conn.query('LOAD EXTENSION fts');
-  } catch {
-    // FTS may already be installed system-wide — not fatal
-  }
+    const lbug = await import('@ladybugdb/core');
 
-  await conn.close();
-  await db.close();
+    // Create DB with full schema
+    const db = new lbug.default.Database(dbPath);
+    const conn = new lbug.default.Connection(db);
+
+    for (const q of NODE_SCHEMA_QUERIES) {
+      await conn.query(q);
+    }
+    for (const q of REL_SCHEMA_QUERIES) {
+      await conn.query(q);
+    }
+    await conn.query(EMBEDDING_SCHEMA);
+
+    // Pre-install FTS extension so forks don't need to download it
+    try {
+      await conn.query('INSTALL fts');
+      await conn.query('LOAD EXTENSION fts');
+    } catch {
+      // FTS may already be installed system-wide — not fatal
+    }
+
+    await conn.close();
+    await db.close();
+  } catch (err: any) {
+    // Native addon not available locally (ERR_DLOPEN_FAILED)
+    // Tests that don't need LadybugDB can still run with mocked dependencies
+    if (err?.code !== 'ERR_DLOPEN_FAILED') {
+      throw err;
+    }
+  }
 
   // Share the dbPath with all test files via inject('lbugDbPath')
   provide('lbugDbPath', dbPath);
@@ -52,3 +61,4 @@ export default async function setup({ provide }: GlobalSetupContext) {
     await tmpHandle.cleanup();
   };
 }
+
